@@ -1,5 +1,3 @@
-import React from "react";
-
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -9,13 +7,14 @@ import {
   Users,
   BarChart3,
   Settings,
-  LogOut,
   Menu,
   X,
 } from "lucide-react";
 
+import { useState } from "react";
+
 function Layout({ activePage, setActivePage, children }) {
-  const [sidebarOpen, setSidebarOpen] = React.useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const menuItems = [
     {
@@ -58,24 +57,24 @@ function Layout({ activePage, setActivePage, children }) {
   };
 
   return (
-    <div className="app-layout">
+    <div className="app">
+
+      {/* MOBILE OVERLAY */}
       {sidebarOpen && (
         <div
-          className="mobile-overlay"
+          className="sidebar-overlay"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
-        <div className="sidebar-header">
-          <div className="brand">
-            <div className="brand-logo">J</div>
+      {/* SIDEBAR */}
+      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
 
-            <div>
-              <h1>JESTA</h1>
-              <span>POINT OF SALE</span>
-            </div>
-          </div>
+        {/* LOGO */}
+        <div className="logo">
+          <h1>
+            JESTA<span>.</span>
+          </h1>
 
           <button
             className="mobile-close"
@@ -85,8 +84,11 @@ function Layout({ activePage, setActivePage, children }) {
           </button>
         </div>
 
-        <nav className="sidebar-nav">
-          <p className="nav-title">MAIN MENU</p>
+        {/* NAVIGATION */}
+        <nav>
+          <div className="nav-section-title">
+            MAIN MENU
+          </div>
 
           {menuItems.map((item) => {
             const Icon = item.icon;
@@ -94,62 +96,79 @@ function Layout({ activePage, setActivePage, children }) {
             return (
               <button
                 key={item.name}
-                className={`nav-item ${
-                  activePage === item.name ? "active" : ""
-                }`}
-                onClick={() => handleNavigation(item.name)}
+                className={
+                  activePage === item.name
+                    ? "active"
+                    : ""
+                }
+                onClick={() =>
+                  handleNavigation(item.name)
+                }
               >
                 <Icon size={19} />
+
                 <span>{item.name}</span>
               </button>
             );
           })}
         </nav>
 
+        {/* SIDEBAR FOOTER */}
         <div className="sidebar-footer">
-          <div className="system-status">
-            <span className="status-dot"></span>
-
-            <div>
-              <strong>System Online</strong>
-              <small>Supabase connected</small>
-            </div>
-          </div>
-
-          <button className="logout-button">
-            <LogOut size={18} />
-            <span>Logout</span>
-          </button>
+          <strong>JESTA POS</strong>
+          <span>Business Management System</span>
+          <small>Version 1.0</small>
         </div>
       </aside>
 
-      <div className="main-area">
-        <header className="topbar">
-          <button
-            className="menu-button"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Menu size={24} />
-          </button>
+      {/* MAIN AREA */}
+      <div className="main-content">
 
-          <div className="topbar-title">
-            <span>JESTA POS</span>
-            <strong>{activePage}</strong>
-          </div>
+        {/* HEADER */}
+        <header className="top-header">
 
-          <div className="topbar-actions">
-            <div className="user-profile">
-              <div className="user-avatar">A</div>
+          <div className="header-left">
 
-              <div className="user-details">
-                <strong>Administrator</strong>
-                <span>System Admin</span>
-              </div>
+            <button
+              className="mobile-menu"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu size={22} />
+            </button>
+
+            <div className="header-title">
+              <h1>
+                {activePage}
+              </h1>
+
+              <p>
+                Manage your business efficiently
+              </p>
             </div>
+
           </div>
+
+          {/* USER AREA */}
+          <div className="user-area">
+
+            <div className="user-avatar">
+              A
+            </div>
+
+            <div className="user-info">
+              <strong>Administrator</strong>
+              <span>JESTA POS</span>
+            </div>
+
+          </div>
+
         </header>
 
-        <main className="page-content">{children}</main>
+        {/* PAGE CONTENT */}
+        <main className="page-content">
+          {children}
+        </main>
+
       </div>
     </div>
   );
