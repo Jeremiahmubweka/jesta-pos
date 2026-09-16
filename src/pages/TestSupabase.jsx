@@ -2,109 +2,206 @@ import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 function TestSupabase() {
-  const [status, setStatus] = useState(
-    "Testing Supabase connection..."
-  );
-
-  const [businesses, setBusinesses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [business, setBusiness] = useState(null);
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    async function testConnection() {
-      const { data, error } = await supabase
-        .from("businesses")
-        .select("id, name")
-        .limit(10);
+    async function checkUserAndBusiness() {
+      setLoading(true);
+      setErrorMessage("");
 
-      if (error) {
-        console.error("Supabase error:", error);
+      // Get logged-in user
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
 
-        setStatus(
-          `Connection failed: ${error.message}`
-        );
+      if (userError) {
+        console.error("User error:", userError);
+
+        setErrorMessage(userError.message);
+        setLoading(false);
 
         return;
       }
 
-      console.log("Businesses returned:", data);
+      if (!user) {
+        setErrorMessage("No authenticated user found.");
+        setLoading(false);
 
-      setBusinesses(data || []);
+        return;
+      }
 
-      setStatus(
-        `Connected successfully! Found ${
-          data?.length || 0
-        } business(es).`
-      );
+      console.log("Authenticated user:", user);
+
+      setUser(user);
+
+      // Get the business connected to this user
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .select(`
+          full_name,
+          role,
+          business_id,
+          businesses (
+            id,
+            name,
+            business_type,
+            currency,
+            timezone
+          )
+        `)
+        .eq("id", user.id)
+        .eq("is_active", true)
+        .single();
+
+      if (error) {
+        console.error(
+          "Business profile error:",
+          error
+        );
+
+        setErrorMessage(error.message);
+        setLoading(false);
+
+        return;
+      }
+
+      console.log("User profile:", data);
+
+      setBusiness(data);
+      setLoading(false);
     }
 
-    testConnection();
+    checkUserAndBusiness();
   }, []);
 
+  if (loading) {
+    return (
+      <div className="dashboard">
+        <div className="dashboard-card">
+          <div className="empty-state">
+            <h3>Checking account...</h3>
+            <p>
+              Verifying your JESTA business connection.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "30px",
-        background: "#f5f7fb",
-      }}
-    >
-      <div
-        style={{
-          background: "#ffffff",
-          padding: "40px",
-          borderRadius: "12px",
-          maxWidth: "600px",
-          width: "100%",
-          boxShadow: "0 10px 30px rgba(0, 0, 0, 0.08)",
-        }}
-      >
-        <h1 style={{ marginBottom: "10px" }}>
-          JESTA POS
-        </h1>
+    <div className="dashboard">
+      <div className="page-heading">
+        <div>
+          <h2>System Verification</h2>
+          <p>
+            Checking authentication and business
+            connection.
+          </p>
+        </div>
+      </div>
 
-        <p
-          style={{
-            marginBottom: "25px",
-            color: "#64748b",
-          }}
-        >
-          Supabase Connection Test
-        </p>
+      {errorMessage && (
+        <div className="inventory-message error">
+          {errorMessage}
+        </div>
+      )}
 
-        <div
-          style={{
-            padding: "15px",
-            background: "#f1f5f9",
-            borderRadius: "8px",
-            marginBottom: "20px",
-          }}
-        >
-          {status}
+      <div className="dashboard-card">
+        <div className="inventory-card-header">
+          <div>
+            <h3>Authentication</h3>
+            <p>
+              Current Supabase authenticated user.
+            </p>
+          </div>
         </div>
 
-        {businesses.length > 0 && (
-          <div>
-            <h3 style={{ marginBottom: "10px" }}>
-              Businesses found:
-            </h3>
+        <div className="settings-grid">
+          <div className="settings-card">
+            <span className="settings-label">
+              Email
+            </span>
 
-            {businesses.map((business) => (
-              <div
-                key={business.id}
-                style={{
-                  padding: "10px",
-                  borderBottom:
-                    "1px solid #e2e8f0",
-                }}
-              >
-                {business.name}
-              </div>
-            ))}
+            <strong>
+              {user?.email || "Not found"}
+            </strong>
           </div>
-        )}
+
+          <div className="settings-card">
+            <span className="settings-label">
+              User ID
+            </span>
+
+            <strong>
+              {user?.id || "Not found"}
+            </strong>
+          </div>
+        </div>
       </div>
+
+      {business && (
+        <div className="dashboard-card">
+          <div className="inventory-card-header">
+            <div>
+              <h3>Business Connection</h3>
+              <p>
+                Business connected to your user
+                profile.
+              </p>
+            </div>
+          </div>
+
+          <div className="settings-grid">
+            <div className="settings-card">
+              <span className="settings-label">
+                Business
+              </span>
+
+              <strong>
+                {business.businesses?.name ||
+                  "Not found"}
+              </strong>
+            </div>
+
+            <div className="settings-card">
+              <span className="settings-label">
+                Business ID
+              </span>
+
+              <strong>
+                {business.business_id}
+              </strong>
+            </div>
+
+            <div className="settings-card">
+              <span className="settings-label">
+                Business Type
+              </span>
+
+              <strong>
+                {business.businesses
+                  ?.business_type || "Not found"}
+              </strong>
+            </div>
+
+            <div className="settings-card">
+              <span className="settings-label">
+                Currency
+              </span>
+
+              <strong>
+                {business.businesses?.currency ||
+                  "Not found"}
+              </strong>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

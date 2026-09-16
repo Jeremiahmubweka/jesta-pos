@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -9,46 +11,27 @@ import {
   Settings,
   Menu,
   X,
+  LogOut,
 } from "lucide-react";
 
-import { useState } from "react";
-
-function Layout({ activePage, setActivePage, children }) {
+function Layout({
+  activePage,
+  setActivePage,
+  user,
+  onLogout,
+  children,
+}) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const menuItems = [
-    {
-      name: "Dashboard",
-      icon: LayoutDashboard,
-    },
-    {
-      name: "Sales",
-      icon: ShoppingCart,
-    },
-    {
-      name: "Inventory",
-      icon: Package,
-    },
-    {
-      name: "Purchases",
-      icon: Truck,
-    },
-    {
-      name: "Expenses",
-      icon: Receipt,
-    },
-    {
-      name: "Customers",
-      icon: Users,
-    },
-    {
-      name: "Reports",
-      icon: BarChart3,
-    },
-    {
-      name: "Settings",
-      icon: Settings,
-    },
+    { name: "Dashboard", icon: LayoutDashboard },
+    { name: "Sales", icon: ShoppingCart },
+    { name: "Inventory", icon: Package },
+    { name: "Purchases", icon: Truck },
+    { name: "Expenses", icon: Receipt },
+    { name: "Customers", icon: Users },
+    { name: "Reports", icon: BarChart3 },
+    { name: "Settings", icon: Settings },
   ];
 
   const handleNavigation = (page) => {
@@ -56,10 +39,17 @@ function Layout({ activePage, setActivePage, children }) {
     setSidebarOpen(false);
   };
 
+  const handleLogout = async () => {
+    await onLogout();
+  };
+
+  const displayName =
+    user?.user_metadata?.full_name ||
+    user?.email?.split("@")[0] ||
+    "Administrator";
+
   return (
     <div className="app">
-
-      {/* MOBILE OVERLAY */}
       {sidebarOpen && (
         <div
           className="sidebar-overlay"
@@ -67,10 +57,7 @@ function Layout({ activePage, setActivePage, children }) {
         />
       )}
 
-      {/* SIDEBAR */}
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
-
-        {/* LOGO */}
         <div className="logo">
           <h1>
             JESTA<span>.</span>
@@ -79,12 +66,12 @@ function Layout({ activePage, setActivePage, children }) {
           <button
             className="mobile-close"
             onClick={() => setSidebarOpen(false)}
+            aria-label="Close menu"
           >
             <X size={22} />
           </button>
         </div>
 
-        {/* NAVIGATION */}
         <nav>
           <div className="nav-section-title">
             MAIN MENU
@@ -106,14 +93,12 @@ function Layout({ activePage, setActivePage, children }) {
                 }
               >
                 <Icon size={19} />
-
                 <span>{item.name}</span>
               </button>
             );
           })}
         </nav>
 
-        {/* SIDEBAR FOOTER */}
         <div className="sidebar-footer">
           <strong>JESTA POS</strong>
           <span>Business Management System</span>
@@ -121,54 +106,48 @@ function Layout({ activePage, setActivePage, children }) {
         </div>
       </aside>
 
-      {/* MAIN AREA */}
       <div className="main-content">
-
-        {/* HEADER */}
         <header className="top-header">
-
           <div className="header-left">
-
             <button
               className="mobile-menu"
               onClick={() => setSidebarOpen(true)}
+              aria-label="Open menu"
             >
               <Menu size={22} />
             </button>
 
             <div className="header-title">
-              <h1>
-                {activePage}
-              </h1>
-
-              <p>
-                Manage your business efficiently
-              </p>
+              <h1>{activePage}</h1>
+              <p>Manage your business efficiently</p>
             </div>
-
           </div>
 
-          {/* USER AREA */}
           <div className="user-area">
-
             <div className="user-avatar">
-              A
+              {displayName.charAt(0).toUpperCase()}
             </div>
 
             <div className="user-info">
-              <strong>Administrator</strong>
-              <span>JESTA POS</span>
+              <strong>{displayName}</strong>
+              <span>{user?.email || "JESTA POS"}</span>
             </div>
 
+            <button
+              className="logout-button"
+              onClick={handleLogout}
+              title="Log out"
+              aria-label="Log out"
+            >
+              <LogOut size={18} />
+              <span>Logout</span>
+            </button>
           </div>
-
         </header>
 
-        {/* PAGE CONTENT */}
         <main className="page-content">
           {children}
         </main>
-
       </div>
     </div>
   );
