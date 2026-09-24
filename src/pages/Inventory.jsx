@@ -8,6 +8,9 @@ import {
   Trash2,
   X,
   RefreshCw,
+  AlertTriangle,
+  Boxes,
+  TrendingUp,
 } from "lucide-react";
 
 import { supabase } from "../lib/supabase";
@@ -35,8 +38,7 @@ function Inventory() {
   const [searchTerm, setSearchTerm] = useState("");
 
   const [showForm, setShowForm] = useState(false);
-  const [editingProduct, setEditingProduct] =
-    useState(null);
+  const [editingProduct, setEditingProduct] = useState(null);
 
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -80,10 +82,7 @@ function Inventory() {
       });
 
     if (error) {
-      console.error(
-        "Products loading error:",
-        error
-      );
+      console.error("Products loading error:", error);
 
       setErrorMessage(
         `Could not load products: ${error.message}`
@@ -108,10 +107,7 @@ function Inventory() {
       });
 
     if (error) {
-      console.error(
-        "Categories loading error:",
-        error
-      );
+      console.error("Categories loading error:", error);
 
       setErrorMessage(
         `Could not load categories: ${error.message}`
@@ -124,27 +120,18 @@ function Inventory() {
   }
 
   const filteredProducts = useMemo(() => {
-    const search = searchTerm
-      .trim()
-      .toLowerCase();
+    const search = searchTerm.trim().toLowerCase();
 
     if (!search) {
       return products;
     }
 
     return products.filter((product) => {
-      const name =
-        product.name?.toLowerCase() || "";
-
-      const sku =
-        product.sku?.toLowerCase() || "";
-
-      const barcode =
-        product.barcode?.toLowerCase() || "";
-
+      const name = product.name?.toLowerCase() || "";
+      const sku = product.sku?.toLowerCase() || "";
+      const barcode = product.barcode?.toLowerCase() || "";
       const category =
-        product.categories?.name?.toLowerCase() ||
-        "";
+        product.categories?.name?.toLowerCase() || "";
 
       return (
         name.includes(search) ||
@@ -154,6 +141,38 @@ function Inventory() {
       );
     });
   }, [products, searchTerm]);
+
+  const inventoryStats = useMemo(() => {
+    const totalProducts = products.length;
+
+    const lowStockProducts = products.filter((product) => {
+      const stock = Number(product.stock_quantity) || 0;
+      const minimum = Number(product.minimum_stock) || 0;
+
+      return stock > 0 && stock <= minimum;
+    }).length;
+
+    const outOfStockProducts = products.filter((product) => {
+      const stock = Number(product.stock_quantity) || 0;
+
+      return stock <= 0;
+    }).length;
+
+    const inventoryValue = products.reduce((total, product) => {
+      return (
+        total +
+        (Number(product.buying_price) || 0) *
+          (Number(product.stock_quantity) || 0)
+      );
+    }, 0);
+
+    return {
+      totalProducts,
+      lowStockProducts,
+      outOfStockProducts,
+      inventoryValue,
+    };
+  }, [products]);
 
   function openAddForm() {
     setEditingProduct(null);
@@ -170,21 +189,15 @@ function Inventory() {
       name: product.name || "",
       sku: product.sku || "",
       barcode: product.barcode || "",
-      category_id:
-        product.category_id
-          ? String(product.category_id)
-          : "",
+      category_id: product.category_id
+        ? String(product.category_id)
+        : "",
       unit: product.unit || "Piece",
-      buying_price:
-        product.buying_price ?? "",
-      selling_price:
-        product.selling_price ?? "",
-      stock_quantity:
-        product.stock_quantity ?? "",
-      minimum_stock:
-        product.minimum_stock ?? "",
-      description:
-        product.description || "",
+      buying_price: product.buying_price ?? "",
+      selling_price: product.selling_price ?? "",
+      stock_quantity: product.stock_quantity ?? "",
+      minimum_stock: product.minimum_stock ?? "",
+      description: product.description || "",
     });
 
     setMessage("");
@@ -219,10 +232,7 @@ function Inventory() {
     setErrorMessage("");
 
     if (!form.name.trim()) {
-      setErrorMessage(
-        "Product name is required."
-      );
-
+      setErrorMessage("Product name is required.");
       setSaving(false);
       return;
     }
@@ -239,16 +249,10 @@ function Inventory() {
       return;
     }
 
-    /*
-      Get the business belonging to the
-      currently authenticated user.
-    */
     const {
       data: businessId,
       error: businessError,
-    } = await supabase.rpc(
-      "get_my_business_id"
-    );
+    } = await supabase.rpc("get_my_business_id");
 
     if (businessError) {
       console.error(
@@ -280,13 +284,11 @@ function Inventory() {
       sku: form.sku.trim() || null,
       barcode: form.barcode.trim() || null,
 
-      category_id:
-        form.category_id
-          ? Number(form.category_id)
-          : null,
+      category_id: form.category_id
+        ? Number(form.category_id)
+        : null,
 
-      unit:
-        form.unit.trim() || "Piece",
+      unit: form.unit.trim() || "Piece",
 
       buying_price:
         Number(form.buying_price) || 0,
@@ -329,9 +331,7 @@ function Inventory() {
         return;
       }
 
-      setMessage(
-        "Product updated successfully."
-      );
+      setMessage("Product updated successfully.");
     } else {
       const { error } = await supabase
         .from("products")
@@ -352,9 +352,7 @@ function Inventory() {
         return;
       }
 
-      setMessage(
-        "Product created successfully."
-      );
+      setMessage("Product created successfully.");
     }
 
     setSaving(false);
@@ -397,9 +395,7 @@ function Inventory() {
       return;
     }
 
-    setMessage(
-      "Product removed successfully."
-    );
+    setMessage("Product removed successfully.");
 
     await loadProducts();
   }
@@ -414,25 +410,25 @@ function Inventory() {
     if (stock <= 0) {
       return {
         label: "Out of stock",
-        className: "stock-danger",
+        className: "jesta-stock-out",
       };
     }
 
     if (stock <= minimum) {
       return {
         label: "Low stock",
-        className: "stock-warning",
+        className: "jesta-stock-low",
       };
     }
 
     return {
       label: "In stock",
-      className: "stock-success",
+      className: "jesta-stock-good",
     };
   }
 
   function formatMoney(value) {
-    return `KES ${Number(value || 0).toLocaleString(
+    return `KSh ${Number(value || 0).toLocaleString(
       "en-KE",
       {
         minimumFractionDigits: 2,
@@ -442,18 +438,25 @@ function Inventory() {
   }
 
   return (
-    <div className="dashboard">
-      <div className="page-heading">
+    <div className="jesta-inventory-page">
+      {/* PAGE HEADER */}
+      <div className="jesta-inventory-header">
         <div>
-          <h2>Inventory</h2>
+          <div className="jesta-inventory-brand">
+            JESTA POS
+          </div>
+
+          <h1>Inventory</h1>
 
           <p>
-            Manage your products, stock and pricing.
+            Manage your products, stock levels and
+            pricing from one place.
           </p>
         </div>
 
         <button
-          className="primary-button"
+          type="button"
+          className="jesta-btn jesta-inventory-primary"
           onClick={openAddForm}
         >
           <Plus size={18} />
@@ -461,20 +464,105 @@ function Inventory() {
         </button>
       </div>
 
+      {/* MESSAGES */}
       {message && (
-        <div className="inventory-message success">
-          {message}
+        <div className="jesta-inventory-alert jesta-inventory-success-alert">
+          <div className="jesta-alert-icon">
+            <TrendingUp size={18} />
+          </div>
+
+          <div className="flex-1">
+            {message}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setMessage("")}
+          >
+            <X size={17} />
+          </button>
         </div>
       )}
 
       {errorMessage && (
-        <div className="inventory-message error">
-          {errorMessage}
+        <div className="jesta-inventory-alert jesta-inventory-error-alert">
+          <div className="jesta-alert-icon">
+            <AlertTriangle size={18} />
+          </div>
+
+          <div className="flex-1">
+            {errorMessage}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setErrorMessage("")}
+          >
+            <X size={17} />
+          </button>
         </div>
       )}
 
-      <div className="toolbar">
-        <div className="search-box">
+      {/* STATISTICS */}
+      <div className="jesta-inventory-stats">
+        <div className="jesta-inventory-stat">
+          <div className="jesta-inventory-stat-icon products">
+            <Package size={21} />
+          </div>
+
+          <div>
+            <p>Total Products</p>
+            <strong>
+              {inventoryStats.totalProducts}
+            </strong>
+          </div>
+        </div>
+
+        <div className="jesta-inventory-stat">
+          <div className="jesta-inventory-stat-icon stock">
+            <Boxes size={21} />
+          </div>
+
+          <div>
+            <p>Low Stock</p>
+            <strong>
+              {inventoryStats.lowStockProducts}
+            </strong>
+          </div>
+        </div>
+
+        <div className="jesta-inventory-stat">
+          <div className="jesta-inventory-stat-icon warning">
+            <AlertTriangle size={21} />
+          </div>
+
+          <div>
+            <p>Out of Stock</p>
+            <strong>
+              {inventoryStats.outOfStockProducts}
+            </strong>
+          </div>
+        </div>
+
+        <div className="jesta-inventory-stat">
+          <div className="jesta-inventory-stat-icon value">
+            <TrendingUp size={21} />
+          </div>
+
+          <div>
+            <p>Inventory Value</p>
+            <strong>
+              {formatMoney(
+                inventoryStats.inventoryValue
+              )}
+            </strong>
+          </div>
+        </div>
+      </div>
+
+      {/* TOOLBAR */}
+      <div className="jesta-inventory-toolbar">
+        <div className="jesta-inventory-search">
           <Search size={18} />
 
           <input
@@ -488,21 +576,29 @@ function Inventory() {
         </div>
 
         <button
-          className="secondary-button"
+          type="button"
+          className="jesta-btn jesta-inventory-refresh"
           onClick={() => {
             loadProducts();
             loadCategories();
           }}
+          disabled={loading}
         >
-          <RefreshCw size={17} />
+          <RefreshCw
+            size={17}
+            className={
+              loading ? "animate-spin" : ""
+            }
+          />
           Refresh
         </button>
       </div>
 
-      <div className="dashboard-card">
-        <div className="inventory-card-header">
+      {/* PRODUCT TABLE */}
+      <div className="jesta-inventory-card">
+        <div className="jesta-inventory-card-header">
           <div>
-            <h3>Products</h3>
+            <h2>Products</h2>
 
             <p>
               {filteredProducts.length} product
@@ -512,13 +608,17 @@ function Inventory() {
               displayed
             </p>
           </div>
+
+          <div className="jesta-inventory-card-count">
+            {filteredProducts.length}
+          </div>
         </div>
 
         {loading ? (
-          <div className="empty-state large">
+          <div className="jesta-inventory-empty">
             <RefreshCw
               size={42}
-              className="loading-icon"
+              className="animate-spin"
             />
 
             <h3>Loading inventory...</h3>
@@ -528,8 +628,10 @@ function Inventory() {
             </p>
           </div>
         ) : filteredProducts.length === 0 ? (
-          <div className="empty-state large">
-            <Package size={42} />
+          <div className="jesta-inventory-empty">
+            <div className="jesta-inventory-empty-icon">
+              <Package size={38} />
+            </div>
 
             <h3>
               {searchTerm
@@ -539,13 +641,14 @@ function Inventory() {
 
             <p>
               {searchTerm
-                ? "Try a different search."
-                : "Add your first product to start managing inventory."}
+                ? "Try a different search term."
+                : "Add your first product to start managing your inventory."}
             </p>
 
             {!searchTerm && (
               <button
-                className="primary-button"
+                type="button"
+                className="jesta-btn jesta-inventory-primary"
                 onClick={openAddForm}
               >
                 <Plus size={18} />
@@ -554,8 +657,8 @@ function Inventory() {
             )}
           </div>
         ) : (
-          <div className="table-wrapper">
-            <table className="data-table">
+          <div className="jesta-inventory-table-wrapper">
+            <table className="jesta-inventory-table">
               <thead>
                 <tr>
                   <th>Product</th>
@@ -578,60 +681,77 @@ function Inventory() {
                     return (
                       <tr key={product.id}>
                         <td>
-                          <div className="product-name-cell">
-                            <strong>
-                              {product.name}
-                            </strong>
+                          <div className="jesta-inventory-product">
+                            <div className="jesta-inventory-product-icon">
+                              <Package size={18} />
+                            </div>
 
-                            {product.barcode && (
-                              <small>
-                                Barcode:{" "}
-                                {product.barcode}
-                              </small>
-                            )}
+                            <div>
+                              <strong>
+                                {product.name}
+                              </strong>
+
+                              {product.barcode && (
+                                <small>
+                                  Barcode:{" "}
+                                  {product.barcode}
+                                </small>
+                              )}
+                            </div>
                           </div>
                         </td>
 
                         <td>
-                          {product.sku || "—"}
+                          <span className="jesta-inventory-code">
+                            {product.sku || "—"}
+                          </span>
                         </td>
 
                         <td>
-                          {product.categories
-                            ?.name || "Uncategorized"}
+                          <span className="jesta-inventory-category">
+                            {product.categories
+                              ?.name ||
+                              "Uncategorized"}
+                          </span>
                         </td>
 
-                        <td>
+                        <td className="jesta-money">
                           {formatMoney(
                             product.buying_price
                           )}
                         </td>
 
-                        <td>
+                        <td className="jesta-selling-price">
                           {formatMoney(
                             product.selling_price
                           )}
                         </td>
 
                         <td>
-                          {Number(
-                            product.stock_quantity || 0
-                          ).toLocaleString()}{" "}
-                          {product.unit || ""}
+                          <strong className="jesta-stock-number">
+                            {Number(
+                              product.stock_quantity ||
+                                0
+                            ).toLocaleString()}
+                          </strong>{" "}
+                          <span className="jesta-stock-unit">
+                            {product.unit || ""}
+                          </span>
                         </td>
 
                         <td>
                           <span
-                            className={`stock-status ${stockStatus.className}`}
+                            className={`jesta-stock-badge ${stockStatus.className}`}
                           >
                             {stockStatus.label}
                           </span>
                         </td>
 
                         <td>
-                          <div className="table-actions">
+                          <div className="jesta-inventory-actions">
                             <button
-                              className="icon-button edit"
+                              type="button"
+                              className="jesta-inventory-action edit"
                               title="Edit product"
                               onClick={() =>
                                 openEditForm(
@@ -643,7 +763,8 @@ function Inventory() {
                             </button>
 
                             <button
-                              className="icon-button delete"
+                              type="button"
+                              className="jesta-inventory-action delete"
                               title="Remove product"
                               onClick={() =>
                                 deleteProduct(
@@ -665,24 +786,34 @@ function Inventory() {
         )}
       </div>
 
+      {/* ADD / EDIT MODAL */}
       {showForm && (
-        <div className="modal-overlay">
-          <div className="product-modal">
-            <div className="modal-header">
-              <div>
-                <h3>
-                  {editingProduct
-                    ? "Edit Product"
-                    : "Add Product"}
-                </h3>
+        <div className="jesta-inventory-modal-overlay">
+          <div className="jesta-inventory-modal">
+            <div className="jesta-inventory-modal-header">
+              <div className="jesta-inventory-modal-title">
+                <div className="jesta-inventory-modal-icon">
+                  <Package size={21} />
+                </div>
 
-                <p>
-                  Enter the product details below.
-                </p>
+                <div>
+                  <h2>
+                    {editingProduct
+                      ? "Edit Product"
+                      : "Add Product"}
+                  </h2>
+
+                  <p>
+                    {editingProduct
+                      ? "Update the product information below."
+                      : "Add a new product to your inventory."}
+                  </p>
+                </div>
               </div>
 
               <button
-                className="modal-close"
+                type="button"
+                className="jesta-inventory-modal-close"
                 onClick={closeForm}
                 disabled={saving}
               >
@@ -691,8 +822,8 @@ function Inventory() {
             </div>
 
             <form onSubmit={saveProduct}>
-              <div className="form-grid">
-                <div className="form-group full">
+              <div className="jesta-inventory-form">
+                <div className="jesta-form-group full">
                   <label>
                     Product Name *
                   </label>
@@ -706,7 +837,7 @@ function Inventory() {
                   />
                 </div>
 
-                <div className="form-group">
+                <div className="jesta-form-group">
                   <label>SKU</label>
 
                   <input
@@ -717,7 +848,7 @@ function Inventory() {
                   />
                 </div>
 
-                <div className="form-group">
+                <div className="jesta-form-group">
                   <label>Barcode</label>
 
                   <input
@@ -728,7 +859,7 @@ function Inventory() {
                   />
                 </div>
 
-                <div className="form-group">
+                <div className="jesta-form-group">
                   <label>Category</label>
 
                   <select
@@ -753,7 +884,7 @@ function Inventory() {
                   </select>
                 </div>
 
-                <div className="form-group">
+                <div className="jesta-form-group">
                   <label>Unit</label>
 
                   <input
@@ -764,41 +895,49 @@ function Inventory() {
                   />
                 </div>
 
-                <div className="form-group">
+                <div className="jesta-form-group">
                   <label>
                     Buying Price *
                   </label>
 
-                  <input
-                    name="buying_price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.buying_price}
-                    onChange={handleChange}
-                    placeholder="0.00"
-                    required
-                  />
+                  <div className="jesta-input-prefix">
+                    <span>KSh</span>
+
+                    <input
+                      name="buying_price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.buying_price}
+                      onChange={handleChange}
+                      placeholder="0.00"
+                      required
+                    />
+                  </div>
                 </div>
 
-                <div className="form-group">
+                <div className="jesta-form-group">
                   <label>
                     Selling Price *
                   </label>
 
-                  <input
-                    name="selling_price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.selling_price}
-                    onChange={handleChange}
-                    placeholder="0.00"
-                    required
-                  />
+                  <div className="jesta-input-prefix">
+                    <span>KSh</span>
+
+                    <input
+                      name="selling_price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.selling_price}
+                      onChange={handleChange}
+                      placeholder="0.00"
+                      required
+                    />
+                  </div>
                 </div>
 
-                <div className="form-group">
+                <div className="jesta-form-group">
                   <label>
                     Opening Stock
                   </label>
@@ -814,7 +953,7 @@ function Inventory() {
                   />
                 </div>
 
-                <div className="form-group">
+                <div className="jesta-form-group">
                   <label>
                     Minimum Stock
                   </label>
@@ -830,7 +969,7 @@ function Inventory() {
                   />
                 </div>
 
-                <div className="form-group full">
+                <div className="jesta-form-group full">
                   <label>Description</label>
 
                   <textarea
@@ -843,10 +982,10 @@ function Inventory() {
                 </div>
               </div>
 
-              <div className="modal-actions">
+              <div className="jesta-inventory-modal-actions">
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="jesta-btn jesta-inventory-cancel"
                   onClick={closeForm}
                   disabled={saving}
                 >
@@ -855,14 +994,25 @@ function Inventory() {
 
                 <button
                   type="submit"
-                  className="primary-button"
+                  className="jesta-btn jesta-inventory-primary"
                   disabled={saving}
                 >
-                  {saving
-                    ? "Saving..."
-                    : editingProduct
-                    ? "Update Product"
-                    : "Save Product"}
+                  {saving ? (
+                    <>
+                      <RefreshCw
+                        size={17}
+                        className="animate-spin"
+                      />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Plus size={17} />
+                      {editingProduct
+                        ? "Update Product"
+                        : "Save Product"}
+                    </>
+                  )}
                 </button>
               </div>
             </form>

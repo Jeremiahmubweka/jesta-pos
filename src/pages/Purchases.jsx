@@ -8,6 +8,12 @@ import {
   Trash2,
   ShoppingCart,
   CheckCircle,
+  Package,
+  Truck,
+  Wallet,
+  Receipt,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 
 import { supabase } from "../lib/supabase";
@@ -316,6 +322,38 @@ function Purchases() {
   const paid = Number(amountPaid || 0);
 
   const balance = Math.max(total - paid, 0);
+
+  // =========================
+  // PURCHASE STATISTICS
+  // =========================
+  const purchaseStats = useMemo(() => {
+    const totalPurchases = purchases.length;
+
+    const totalValue = purchases.reduce(
+      (sum, purchase) =>
+        sum + Number(purchase.total_amount || 0),
+      0
+    );
+
+    const totalPaid = purchases.reduce(
+      (sum, purchase) =>
+        sum + Number(purchase.amount_paid || 0),
+      0
+    );
+
+    const totalBalance = purchases.reduce(
+      (sum, purchase) =>
+        sum + Number(purchase.balance_due || 0),
+      0
+    );
+
+    return {
+      totalPurchases,
+      totalValue,
+      totalPaid,
+      totalBalance,
+    };
+  }, [purchases]);
 
   // =========================
   // COMPLETE PURCHASE
@@ -629,7 +667,7 @@ function Purchases() {
   // FORMAT MONEY
   // =========================
   const formatMoney = (value) => {
-    return `KES ${Number(value || 0).toLocaleString(
+    return `KSh ${Number(value || 0).toLocaleString(
       "en-KE",
       {
         minimumFractionDigits: 2,
@@ -643,12 +681,13 @@ function Purchases() {
   // =========================
   if (loading) {
     return (
-      <div className="page-container">
-        <div className="empty-state">
+      <div className="jesta-purchases-page">
+        <div className="jesta-loading">
+          <div className="jesta-loading-spinner"></div>
           <h3>Loading purchases...</h3>
           <p>
-            Please wait while we load your
-            purchase data.
+            Please wait while we load your purchase
+            data.
           </p>
         </div>
       </div>
@@ -656,68 +695,191 @@ function Purchases() {
   }
 
   return (
-    <div className="page-container purchases-page">
+    <div className="jesta-purchases-page">
       {/* =========================
           PAGE HEADER
       ========================= */}
-      <div className="page-header">
-        <div>
-          <h2>Purchases</h2>
-          <p>
-            Manage stock purchases and suppliers.
-          </p>
+      <div className="jesta-purchases-header">
+        <div className="jesta-purchases-brand">
+          <div className="jesta-purchases-brand-icon">
+            <ShoppingCart size={23} />
+          </div>
+
+          <div>
+            <div className="jesta-eyebrow">
+              JESTA POS
+            </div>
+
+            <h2>Purchases</h2>
+
+            <p>
+              Manage stock purchases and suppliers
+              efficiently.
+            </p>
+          </div>
         </div>
 
-        <button
-          className="primary-button"
-          onClick={openPurchaseForm}
-        >
-          <Plus size={18} />
-          New Purchase
-        </button>
+        <div className="jesta-purchases-header-actions">
+          <button
+            className="jesta-btn jesta-btn-secondary"
+            onClick={loadData}
+            title="Refresh purchases"
+          >
+            <RefreshCw size={17} />
+            Refresh
+          </button>
+
+          <button
+            className="jesta-btn jesta-btn-primary jesta-purchases-primary"
+            onClick={openPurchaseForm}
+          >
+            <Plus size={18} />
+            New Purchase
+          </button>
+        </div>
       </div>
 
       {/* =========================
           ALERTS
       ========================= */}
       {message && (
-        <div className="success-alert">
-          <CheckCircle size={18} />
+        <div className="jesta-alert jesta-alert-success">
+          <CheckCircle size={19} />
           <span>{message}</span>
+
+          <button
+            type="button"
+            onClick={() => setMessage("")}
+          >
+            <X size={16} />
+          </button>
         </div>
       )}
 
       {error && (
-        <div className="error-alert">
+        <div className="jesta-alert jesta-alert-error">
+          <AlertCircle size={19} />
           <span>{error}</span>
+
+          <button
+            type="button"
+            onClick={() => setError("")}
+          >
+            <X size={16} />
+          </button>
         </div>
       )}
 
       {/* =========================
+          PURCHASE STATISTICS
+      ========================= */}
+      <div className="jesta-purchases-stats">
+        <div className="jesta-purchase-stat">
+          <div className="jesta-purchase-stat-icon purchases">
+            <Receipt size={21} />
+          </div>
+
+          <div>
+            <span>Total Purchases</span>
+            <strong>
+              {purchaseStats.totalPurchases}
+            </strong>
+          </div>
+        </div>
+
+        <div className="jesta-purchase-stat">
+          <div className="jesta-purchase-stat-icon value">
+            <Package size={21} />
+          </div>
+
+          <div>
+            <span>Purchase Value</span>
+            <strong>
+              {formatMoney(
+                purchaseStats.totalValue
+              )}
+            </strong>
+          </div>
+        </div>
+
+        <div className="jesta-purchase-stat">
+          <div className="jesta-purchase-stat-icon paid">
+            <Wallet size={21} />
+          </div>
+
+          <div>
+            <span>Total Paid</span>
+            <strong>
+              {formatMoney(
+                purchaseStats.totalPaid
+              )}
+            </strong>
+          </div>
+        </div>
+
+        <div className="jesta-purchase-stat">
+          <div className="jesta-purchase-stat-icon balance">
+            <Truck size={21} />
+          </div>
+
+          <div>
+            <span>Outstanding Balance</span>
+            <strong>
+              {formatMoney(
+                purchaseStats.totalBalance
+              )}
+            </strong>
+          </div>
+        </div>
+      </div>
+
+      {/* =========================
           PURCHASE HISTORY
       ========================= */}
-      <section className="content-card">
-        <div className="section-heading">
+      <section className="jesta-purchases-card">
+        <div className="jesta-purchases-card-header">
           <div>
+            <div className="jesta-section-label">
+              TRANSACTIONS
+            </div>
+
             <h3>Purchase History</h3>
+
             <p>
               Recently recorded stock purchases.
             </p>
           </div>
+
+          <div className="jesta-purchases-count">
+            {purchases.length} record
+            {purchases.length !== 1 ? "s" : ""}
+          </div>
         </div>
 
         {purchases.length === 0 ? (
-          <div className="empty-state">
-            <ShoppingCart size={40} />
+          <div className="jesta-purchases-empty">
+            <div className="jesta-purchases-empty-icon">
+              <ShoppingCart size={30} />
+            </div>
+
             <h3>No purchases yet</h3>
+
             <p>
               Your completed purchases will appear
               here.
             </p>
+
+            <button
+              className="jesta-btn jesta-btn-primary"
+              onClick={openPurchaseForm}
+            >
+              <Plus size={17} />
+              Record First Purchase
+            </button>
           </div>
         ) : (
-          <div className="table-wrapper">
-            <table className="data-table">
+          <div className="jesta-purchases-table-wrapper">
+            <table className="jesta-table jesta-purchases-table">
               <thead>
                 <tr>
                   <th>Purchase No.</th>
@@ -734,50 +896,86 @@ function Purchases() {
                 {purchases.map((purchase) => (
                   <tr key={purchase.id}>
                     <td>
-                      <strong>
-                        {purchase.purchase_number}
+                      <div className="jesta-purchase-number">
+                        <div className="jesta-purchase-number-icon">
+                          <Receipt size={16} />
+                        </div>
+
+                        <strong>
+                          {purchase.purchase_number}
+                        </strong>
+                      </div>
+                    </td>
+
+                    <td>
+                      <div className="jesta-supplier-cell">
+                        <div className="jesta-supplier-avatar">
+                          {(
+                            purchase.suppliers
+                              ?.name || "N"
+                          )
+                            .charAt(0)
+                            .toUpperCase()}
+                        </div>
+
+                        <span>
+                          {purchase.suppliers?.name ||
+                            "N/A"}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td>
+                      <span className="jesta-date">
+                        {purchase.purchase_date
+                          ? new Date(
+                              purchase.purchase_date
+                            ).toLocaleDateString(
+                              "en-KE"
+                            )
+                          : new Date(
+                              purchase.created_at
+                            ).toLocaleDateString(
+                              "en-KE"
+                            )}
+                      </span>
+                    </td>
+
+                    <td>
+                      <strong className="jesta-money">
+                        {formatMoney(
+                          purchase.total_amount
+                        )}
                       </strong>
                     </td>
 
                     <td>
-                      {purchase.suppliers?.name ||
-                        "N/A"}
+                      <span className="jesta-paid-amount">
+                        {formatMoney(
+                          purchase.amount_paid
+                        )}
+                      </span>
                     </td>
 
                     <td>
-                      {purchase.purchase_date
-                        ? new Date(
-                            purchase.purchase_date
-                          ).toLocaleDateString(
-                            "en-KE"
-                          )
-                        : new Date(
-                            purchase.created_at
-                          ).toLocaleDateString(
-                            "en-KE"
-                          )}
+                      <span
+                        className={
+                          Number(
+                            purchase.balance_due || 0
+                          ) > 0
+                            ? "jesta-balance-due"
+                            : "jesta-balance-cleared"
+                        }
+                      >
+                        {formatMoney(
+                          purchase.balance_due
+                        )}
+                      </span>
                     </td>
 
                     <td>
-                      {formatMoney(
-                        purchase.total_amount
-                      )}
-                    </td>
-
-                    <td>
-                      {formatMoney(
-                        purchase.amount_paid
-                      )}
-                    </td>
-
-                    <td>
-                      {formatMoney(
-                        purchase.balance_due
-                      )}
-                    </td>
-
-                    <td>
-                      <span className="status-badge success">
+                      <span className="jesta-status-badge success">
+                        <CheckCircle size={13} />
                         {purchase.status ||
                           "received"}
                       </span>
@@ -793,55 +991,90 @@ function Purchases() {
       {/* =========================
           SUPPLIERS
       ========================= */}
-      <section className="content-card">
-        <div className="section-heading">
+      <section className="jesta-purchases-card">
+        <div className="jesta-purchases-card-header jesta-supplier-header">
           <div>
+            <div className="jesta-section-label">
+              SUPPLIER MANAGEMENT
+            </div>
+
             <h3>Suppliers</h3>
+
             <p>
-              Manage your active suppliers.
+              Manage your active suppliers and
+              outstanding balances.
             </p>
           </div>
 
           <button
-            className="secondary-button"
-            onClick={() =>
-              openSupplierForm()
-            }
+            className="jesta-btn jesta-btn-primary"
+            onClick={() => openSupplierForm()}
           >
             <UserPlus size={17} />
             Add Supplier
           </button>
         </div>
 
-        <div className="search-box">
-          <Search size={18} />
+        <div className="jesta-purchases-toolbar">
+          <div className="jesta-purchases-search">
+            <Search size={18} />
 
-          <input
-            type="text"
-            placeholder="Search suppliers..."
-            value={supplierSearch}
-            onChange={(event) =>
-              setSupplierSearch(
-                event.target.value
-              )
-            }
-          />
+            <input
+              type="text"
+              placeholder="Search suppliers by name, phone or email..."
+              value={supplierSearch}
+              onChange={(event) =>
+                setSupplierSearch(
+                  event.target.value
+                )
+              }
+            />
+
+            {supplierSearch && (
+              <button
+                type="button"
+                onClick={() => setSupplierSearch("")}
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+
+          <div className="jesta-purchases-toolbar-info">
+            {filteredSuppliers.length} supplier
+            {filteredSuppliers.length !== 1
+              ? "s"
+              : ""}
+          </div>
         </div>
 
         {filteredSuppliers.length === 0 ? (
-          <div className="empty-state">
+          <div className="jesta-purchases-empty supplier-empty">
+            <div className="jesta-purchases-empty-icon">
+              <Truck size={30} />
+            </div>
+
             <h3>No suppliers found</h3>
+
             <p>
               Add your first supplier to begin
               recording purchases.
             </p>
+
+            <button
+              className="jesta-btn jesta-btn-primary"
+              onClick={() => openSupplierForm()}
+            >
+              <UserPlus size={17} />
+              Add Supplier
+            </button>
           </div>
         ) : (
-          <div className="table-wrapper">
-            <table className="data-table">
+          <div className="jesta-purchases-table-wrapper">
+            <table className="jesta-table jesta-suppliers-table">
               <thead>
                 <tr>
-                  <th>Name</th>
+                  <th>Supplier</th>
                   <th>Phone</th>
                   <th>Email</th>
                   <th>Balance</th>
@@ -854,9 +1087,26 @@ function Purchases() {
                   (supplier) => (
                     <tr key={supplier.id}>
                       <td>
-                        <strong>
-                          {supplier.name}
-                        </strong>
+                        <div className="jesta-supplier-cell">
+                          <div className="jesta-supplier-avatar large">
+                            {supplier.name
+                              ?.charAt(0)
+                              .toUpperCase() || "S"}
+                          </div>
+
+                          <div className="jesta-supplier-details">
+                            <strong>
+                              {supplier.name}
+                            </strong>
+
+                            {supplier.tax_number && (
+                              <small>
+                                Tax No:{" "}
+                                {supplier.tax_number}
+                              </small>
+                            )}
+                          </div>
+                        </div>
                       </td>
 
                       <td>
@@ -868,15 +1118,26 @@ function Purchases() {
                       </td>
 
                       <td>
-                        {formatMoney(
-                          supplier.current_balance
-                        )}
+                        <span
+                          className={
+                            Number(
+                              supplier.current_balance ||
+                                0
+                            ) > 0
+                              ? "jesta-balance-due"
+                              : "jesta-balance-cleared"
+                          }
+                        >
+                          {formatMoney(
+                            supplier.current_balance
+                          )}
+                        </span>
                       </td>
 
                       <td>
-                        <div className="table-actions">
+                        <div className="jesta-purchases-actions">
                           <button
-                            className="icon-button"
+                            className="jesta-action-btn edit"
                             title="Edit supplier"
                             onClick={() =>
                               openSupplierForm(
@@ -888,7 +1149,7 @@ function Purchases() {
                           </button>
 
                           <button
-                            className="icon-button danger"
+                            className="jesta-action-btn delete"
                             title="Deactivate supplier"
                             onClick={() =>
                               deactivateSupplier(
@@ -913,20 +1174,33 @@ function Purchases() {
           PURCHASE MODAL
       ========================= */}
       {showPurchaseForm && (
-        <div className="modal-overlay">
-          <div className="modal-card purchase-modal">
-            <div className="modal-header">
-              <div>
-                <h3>New Purchase</h3>
-                <p>
-                  Record stock received from a
-                  supplier.
-                </p>
+        <div className="jesta-modal-overlay">
+          <div className="jesta-purchase-modal">
+            <div className="jesta-purchase-modal-header">
+              <div className="jesta-modal-heading">
+                <div className="jesta-modal-heading-icon purchase">
+                  <ShoppingCart size={22} />
+                </div>
+
+                <div>
+                  <div className="jesta-section-label">
+                    INVENTORY
+                  </div>
+
+                  <h3>New Purchase</h3>
+
+                  <p>
+                    Record stock received from a
+                    supplier.
+                  </p>
+                </div>
               </div>
 
               <button
-                className="modal-close"
+                type="button"
+                className="jesta-modal-close"
                 onClick={closePurchaseForm}
+                disabled={saving}
               >
                 <X size={20} />
               </button>
@@ -934,64 +1208,75 @@ function Purchases() {
 
             <form
               onSubmit={completePurchase}
-              className="modal-form"
+              className="jesta-purchase-form"
             >
-              <div className="form-grid">
-                <div className="form-group">
-                  <label>
-                    Purchase Number
-                  </label>
-
-                  <input
-                    type="text"
-                    value={purchaseNumber}
-                    onChange={(event) =>
-                      setPurchaseNumber(
-                        event.target.value
-                      )
-                    }
-                    required
-                  />
+              {/* PURCHASE DETAILS */}
+              <div className="jesta-purchase-form-section">
+                <div className="jesta-form-section-title">
+                  <Receipt size={17} />
+                  Purchase Details
                 </div>
 
-                <div className="form-group">
-                  <label>Supplier</label>
+                <div className="jesta-form-grid">
+                  <div className="jesta-form-group">
+                    <label>
+                      Purchase Number
+                    </label>
 
-                  <select
-                    value={selectedSupplier}
-                    onChange={(event) =>
-                      setSelectedSupplier(
-                        event.target.value
-                      )
-                    }
-                    required
-                  >
-                    <option value="">
-                      Select supplier
-                    </option>
+                    <input
+                      className="jesta-input"
+                      type="text"
+                      value={purchaseNumber}
+                      onChange={(event) =>
+                        setPurchaseNumber(
+                          event.target.value
+                        )
+                      }
+                      required
+                    />
+                  </div>
 
-                    {suppliers.map(
-                      (supplier) => (
-                        <option
-                          key={supplier.id}
-                          value={supplier.id}
-                        >
-                          {supplier.name}
-                        </option>
-                      )
-                    )}
-                  </select>
+                  <div className="jesta-form-group">
+                    <label>Supplier</label>
+
+                    <select
+                      className="jesta-select"
+                      value={selectedSupplier}
+                      onChange={(event) =>
+                        setSelectedSupplier(
+                          event.target.value
+                        )
+                      }
+                      required
+                    >
+                      <option value="">
+                        Select supplier
+                      </option>
+
+                      {suppliers.map(
+                        (supplier) => (
+                          <option
+                            key={supplier.id}
+                            value={supplier.id}
+                          >
+                            {supplier.name}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </div>
                 </div>
               </div>
 
               {/* PRODUCT SEARCH */}
-              <div className="form-group">
-                <label>
+              <div className="jesta-purchase-form-section">
+                <div className="jesta-form-section-title">
+                  <Package size={17} />
                   Add Products
-                </label>
+                </div>
 
-                <div className="product-search">
-                  <Search size={18} />
+                <div className="jesta-purchase-product-search">
+                  <Search size={19} />
 
                   <input
                     type="text"
@@ -1003,14 +1288,28 @@ function Purchases() {
                       )
                     }
                   />
+
+                  {productSearch && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setProductSearch("")
+                      }
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
                 </div>
 
                 {productSearch && (
-                  <div className="product-results">
+                  <div className="jesta-purchase-product-results">
                     {filteredProducts.length ===
                     0 ? (
-                      <div className="search-empty">
-                        No products found.
+                      <div className="jesta-search-empty">
+                        <Package size={20} />
+                        <span>
+                          No products found.
+                        </span>
                       </div>
                     ) : (
                       filteredProducts.map(
@@ -1018,14 +1317,18 @@ function Purchases() {
                           <button
                             type="button"
                             key={product.id}
-                            className="product-result"
+                            className="jesta-purchase-product-result"
                             onClick={() =>
                               addProductToCart(
                                 product
                               )
                             }
                           >
-                            <div>
+                            <div className="jesta-result-product-icon">
+                              <Package size={17} />
+                            </div>
+
+                            <div className="jesta-result-product-info">
                               <strong>
                                 {product.name}
                               </strong>
@@ -1037,12 +1340,20 @@ function Purchases() {
                               </span>
                             </div>
 
-                            <span>
-                              Stock:{" "}
-                              {
-                                product.stock_quantity
-                              }
-                            </span>
+                            <div className="jesta-result-product-stock">
+                              <small>
+                                Current Stock
+                              </small>
+
+                              <strong>
+                                {product.stock_quantity ??
+                                  0}
+                              </strong>
+                            </div>
+
+                            <div className="jesta-result-add">
+                              <Plus size={17} />
+                            </div>
                           </button>
                         )
                       )
@@ -1052,9 +1363,16 @@ function Purchases() {
               </div>
 
               {/* CART */}
-              <div className="purchase-items">
-                <div className="cart-heading">
-                  <h4>Purchase Items</h4>
+              <div className="jesta-purchase-items">
+                <div className="jesta-purchase-items-header">
+                  <div>
+                    <h4>Purchase Items</h4>
+
+                    <p>
+                      Products being received into
+                      inventory.
+                    </p>
+                  </div>
 
                   <span>
                     {cart.length} item
@@ -1065,16 +1383,21 @@ function Purchases() {
                 </div>
 
                 {cart.length === 0 ? (
-                  <div className="cart-empty">
-                    <ShoppingCart size={32} />
+                  <div className="jesta-purchase-cart-empty">
+                    <div>
+                      <ShoppingCart size={27} />
+                    </div>
+
+                    <h4>No products added</h4>
+
                     <p>
-                      Search and add products to
-                      this purchase.
+                      Search above and add products
+                      to this purchase.
                     </p>
                   </div>
                 ) : (
-                  <div className="purchase-table-wrapper">
-                    <table className="data-table purchase-table">
+                  <div className="jesta-purchase-items-wrapper">
+                    <table className="jesta-table jesta-purchase-items-table">
                       <thead>
                         <tr>
                           <th>Product</th>
@@ -1102,19 +1425,29 @@ function Purchases() {
                               }
                             >
                               <td>
-                                <strong>
-                                  {item.name}
-                                </strong>
+                                <div className="jesta-cart-product">
+                                  <div className="jesta-cart-product-icon">
+                                    <Package
+                                      size={16}
+                                    />
+                                  </div>
 
-                                <small>
-                                  {item.sku ||
-                                    "No SKU"}
-                                </small>
+                                  <div>
+                                    <strong>
+                                      {item.name}
+                                    </strong>
+
+                                    <small>
+                                      {item.sku ||
+                                        "No SKU"}
+                                    </small>
+                                  </div>
+                                </div>
                               </td>
 
                               <td>
                                 <input
-                                  className="table-input"
+                                  className="jesta-table-input"
                                   type="number"
                                   min="0.01"
                                   step="0.01"
@@ -1135,29 +1468,33 @@ function Purchases() {
                               </td>
 
                               <td>
-                                <input
-                                  className="table-input"
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={
-                                    item.unit_cost
-                                  }
-                                  onChange={(
-                                    event
-                                  ) =>
-                                    updateCartItem(
-                                      item.product_id,
-                                      "unit_cost",
-                                      event.target
-                                        .value
-                                    )
-                                  }
-                                />
+                                <div className="jesta-cost-input">
+                                  <span>KSh</span>
+
+                                  <input
+                                    className="jesta-table-input"
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={
+                                      item.unit_cost
+                                    }
+                                    onChange={(
+                                      event
+                                    ) =>
+                                      updateCartItem(
+                                        item.product_id,
+                                        "unit_cost",
+                                        event.target
+                                          .value
+                                      )
+                                    }
+                                  />
+                                </div>
                               </td>
 
                               <td>
-                                <strong>
+                                <strong className="jesta-item-total">
                                   {formatMoney(
                                     itemTotal
                                   )}
@@ -1167,7 +1504,8 @@ function Purchases() {
                               <td>
                                 <button
                                   type="button"
-                                  className="icon-button danger"
+                                  className="jesta-action-btn delete"
+                                  title="Remove product"
                                   onClick={() =>
                                     removeCartItem(
                                       item.product_id
@@ -1189,61 +1527,72 @@ function Purchases() {
               </div>
 
               {/* TOTALS */}
-              <div className="purchase-summary">
-                <div>
-                  <span>Subtotal</span>
-                  <strong>
-                    {formatMoney(subtotal)}
-                  </strong>
+              <div className="jesta-purchase-bottom">
+                <div className="jesta-purchase-summary">
+                  <div className="jesta-summary-row">
+                    <span>Subtotal</span>
+
+                    <strong>
+                      {formatMoney(subtotal)}
+                    </strong>
+                  </div>
+
+                  <div className="jesta-summary-divider"></div>
+
+                  <div className="jesta-summary-row total">
+                    <span>Total</span>
+
+                    <strong>
+                      {formatMoney(total)}
+                    </strong>
+                  </div>
                 </div>
 
-                <div>
-                  <span>Total</span>
-                  <strong className="summary-total">
-                    {formatMoney(total)}
-                  </strong>
+                <div className="jesta-payment-card">
+                  <div className="jesta-payment-heading">
+                    <Wallet size={17} />
+                    Payment
+                  </div>
+
+                  <div className="jesta-form-group">
+                    <label>
+                      Amount Paid
+                    </label>
+
+                    <div className="jesta-money-input">
+                      <span>KSh</span>
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={amountPaid}
+                        onChange={(event) =>
+                          setAmountPaid(
+                            event.target.value
+                          )
+                        }
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="jesta-balance-box">
+                    <span>Balance Due</span>
+
+                    <strong>
+                      {formatMoney(balance)}
+                    </strong>
+                  </div>
                 </div>
               </div>
 
-              <div className="form-grid">
-                <div className="form-group">
-                  <label>
-                    Amount Paid
-                  </label>
-
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={amountPaid}
-                    onChange={(event) =>
-                      setAmountPaid(
-                        event.target.value
-                      )
-                    }
-                    placeholder="0.00"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>
-                    Balance Due
-                  </label>
-
-                  <input
-                    type="text"
-                    value={formatMoney(balance)}
-                    readOnly
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>
-                  Notes
-                </label>
+              {/* NOTES */}
+              <div className="jesta-form-group">
+                <label>Notes</label>
 
                 <textarea
+                  className="jesta-textarea"
                   rows="3"
                   value={notes}
                   onChange={(event) =>
@@ -1253,10 +1602,11 @@ function Purchases() {
                 />
               </div>
 
-              <div className="modal-actions">
+              {/* ACTIONS */}
+              <div className="jesta-purchase-modal-actions">
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="jesta-btn jesta-btn-secondary"
                   onClick={closePurchaseForm}
                   disabled={saving}
                 >
@@ -1265,7 +1615,7 @@ function Purchases() {
 
                 <button
                   type="submit"
-                  className="primary-button"
+                  className="jesta-btn jesta-btn-primary jesta-complete-purchase"
                   disabled={saving}
                 >
                   <CheckCircle size={18} />
@@ -1284,24 +1634,38 @@ function Purchases() {
           SUPPLIER MODAL
       ========================= */}
       {showSupplierForm && (
-        <div className="modal-overlay">
-          <div className="modal-card">
-            <div className="modal-header">
-              <div>
-                <h3>
-                  {editingSupplier
-                    ? "Edit Supplier"
-                    : "Add Supplier"}
-                </h3>
+        <div className="jesta-modal-overlay">
+          <div className="jesta-supplier-modal">
+            <div className="jesta-purchase-modal-header">
+              <div className="jesta-modal-heading">
+                <div className="jesta-modal-heading-icon supplier">
+                  <Truck size={22} />
+                </div>
 
-                <p>
-                  Enter supplier information below.
-                </p>
+                <div>
+                  <div className="jesta-section-label">
+                    SUPPLIERS
+                  </div>
+
+                  <h3>
+                    {editingSupplier
+                      ? "Edit Supplier"
+                      : "Add Supplier"}
+                  </h3>
+
+                  <p>
+                    {editingSupplier
+                      ? "Update supplier information."
+                      : "Add a new supplier to your business."}
+                  </p>
+                </div>
               </div>
 
               <button
-                className="modal-close"
+                type="button"
+                className="jesta-modal-close"
                 onClick={closeSupplierForm}
+                disabled={saving}
               >
                 <X size={20} />
               </button>
@@ -1309,14 +1673,16 @@ function Purchases() {
 
             <form
               onSubmit={saveSupplier}
-              className="modal-form"
+              className="jesta-supplier-form"
             >
-              <div className="form-group">
+              <div className="jesta-form-group">
                 <label>
                   Supplier Name
+                  <span>*</span>
                 </label>
 
                 <input
+                  className="jesta-input"
                   type="text"
                   name="name"
                   value={supplierForm.name}
@@ -1326,13 +1692,12 @@ function Purchases() {
                 />
               </div>
 
-              <div className="form-grid">
-                <div className="form-group">
-                  <label>
-                    Phone
-                  </label>
+              <div className="jesta-form-grid">
+                <div className="jesta-form-group">
+                  <label>Phone</label>
 
                   <input
+                    className="jesta-input"
                     type="text"
                     name="phone"
                     value={supplierForm.phone}
@@ -1341,12 +1706,11 @@ function Purchases() {
                   />
                 </div>
 
-                <div className="form-group">
-                  <label>
-                    Email
-                  </label>
+                <div className="jesta-form-group">
+                  <label>Email</label>
 
                   <input
+                    className="jesta-input"
                     type="email"
                     name="email"
                     value={supplierForm.email}
@@ -1356,12 +1720,11 @@ function Purchases() {
                 </div>
               </div>
 
-              <div className="form-group">
-                <label>
-                  Address
-                </label>
+              <div className="jesta-form-group">
+                <label>Address</label>
 
                 <input
+                  className="jesta-input"
                   type="text"
                   name="address"
                   value={supplierForm.address}
@@ -1370,12 +1733,11 @@ function Purchases() {
                 />
               </div>
 
-              <div className="form-group">
-                <label>
-                  Tax Number
-                </label>
+              <div className="jesta-form-group">
+                <label>Tax Number</label>
 
                 <input
+                  className="jesta-input"
                   type="text"
                   name="tax_number"
                   value={
@@ -1386,10 +1748,10 @@ function Purchases() {
                 />
               </div>
 
-              <div className="modal-actions">
+              <div className="jesta-supplier-modal-actions">
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="jesta-btn jesta-btn-secondary"
                   onClick={closeSupplierForm}
                   disabled={saving}
                 >
@@ -1398,7 +1760,7 @@ function Purchases() {
 
                 <button
                   type="submit"
-                  className="primary-button"
+                  className="jesta-btn jesta-btn-primary"
                   disabled={saving}
                 >
                   {saving

@@ -9,6 +9,9 @@ import {
   RefreshCw,
   Phone,
   Mail,
+  Wallet,
+  CreditCard,
+  UserCheck,
 } from "lucide-react";
 
 import { supabase } from "../lib/supabase";
@@ -97,6 +100,24 @@ function Customers() {
     });
   }, [customers, searchTerm]);
 
+  const totalCustomers = customers.length;
+
+  const customersWithBalance = customers.filter(
+    (customer) => Number(customer.current_balance) > 0
+  ).length;
+
+  const totalOutstanding = customers.reduce(
+    (total, customer) =>
+      total + (Number(customer.current_balance) || 0),
+    0
+  );
+
+  const totalCreditLimit = customers.reduce(
+    (total, customer) =>
+      total + (Number(customer.credit_limit) || 0),
+    0
+  );
+
   const openAddModal = () => {
     setEditingCustomer(null);
 
@@ -123,8 +144,7 @@ function Customers() {
       email: customer.email || "",
       address: customer.address || "",
       tax_number: customer.tax_number || "",
-      credit_limit:
-        customer.credit_limit ?? "",
+      credit_limit: customer.credit_limit ?? "",
     });
 
     setErrorMessage("");
@@ -163,9 +183,7 @@ function Customers() {
       form.credit_limit !== "" &&
       Number(form.credit_limit) < 0
     ) {
-      setErrorMessage(
-        "Credit limit cannot be negative."
-      );
+      setErrorMessage("Credit limit cannot be negative.");
       return;
     }
 
@@ -195,8 +213,7 @@ function Customers() {
         email: form.email.trim() || null,
         address: form.address.trim() || null,
         tax_number: form.tax_number.trim() || null,
-        credit_limit:
-          Number(form.credit_limit) || 0,
+        credit_limit: Number(form.credit_limit) || 0,
       };
 
       if (editingCustomer) {
@@ -308,28 +325,38 @@ function Customers() {
   };
 
   return (
-    <div className="customers-page">
-      <div className="page-heading">
-        <div>
-          <h2>Customers</h2>
-          <p>
-            Manage your customers and their account
-            balances.
-          </p>
+    <div className="jesta-customers-page">
+      {/* PAGE HEADER */}
+      <div className="jesta-customers-header">
+        <div className="jesta-customers-brand">
+          <div className="jesta-customers-brand-icon">
+            <Users size={23} />
+          </div>
+
+          <div>
+            <h1>Customers</h1>
+            <p>
+              Manage your customers, contacts, credit limits
+              and account balances.
+            </p>
+          </div>
         </div>
 
-        <div className="heading-actions">
+        <div className="jesta-customers-header-actions">
           <button
-            className="secondary-button"
+            className="jesta-btn jesta-btn-secondary"
             onClick={loadCustomers}
             disabled={loading}
           >
-            <RefreshCw size={17} />
+            <RefreshCw
+              size={17}
+              className={loading ? "jesta-spin" : ""}
+            />
             Refresh
           </button>
 
           <button
-            className="primary-button"
+            className="jesta-btn jesta-btn-primary jesta-customers-primary"
             onClick={openAddModal}
           >
             <Plus size={18} />
@@ -338,74 +365,178 @@ function Customers() {
         </div>
       </div>
 
+      {/* ALERTS */}
       {errorMessage && (
-        <div className="alert alert-error">
-          <X size={18} />
+        <div className="jesta-customers-alert jesta-customers-error-alert">
+          <div className="jesta-customers-alert-icon">
+            <X size={17} />
+          </div>
           <span>{errorMessage}</span>
+
+          <button
+            onClick={() => setErrorMessage("")}
+            aria-label="Dismiss error"
+          >
+            <X size={16} />
+          </button>
         </div>
       )}
 
       {successMessage && (
-        <div className="alert alert-success">
+        <div className="jesta-customers-alert jesta-customers-success-alert">
+          <div className="jesta-customers-alert-icon">
+            <UserCheck size={17} />
+          </div>
           <span>{successMessage}</span>
+
+          <button
+            onClick={() => setSuccessMessage("")}
+            aria-label="Dismiss message"
+          >
+            <X size={16} />
+          </button>
         </div>
       )}
 
-      <div className="customers-card">
-        <div className="customers-toolbar">
-          <div className="customer-count">
-            <Users size={18} />
-            <span>
-              {filteredCustomers.length} customer
-              {filteredCustomers.length === 1
-                ? ""
-                : "s"}
-            </span>
+      {/* SUMMARY STATS */}
+      <div className="jesta-customers-stats">
+        <div className="jesta-customers-stat">
+          <div className="jesta-customers-stat-icon customers">
+            <Users size={20} />
           </div>
 
-          <div className="customer-search">
+          <div>
+            <span>Total Customers</span>
+            <strong>{totalCustomers}</strong>
+            <small>
+              {filteredCustomers.length !== totalCustomers
+                ? `${filteredCustomers.length} shown`
+                : "Active customers"}
+            </small>
+          </div>
+        </div>
+
+        <div className="jesta-customers-stat">
+          <div className="jesta-customers-stat-icon credit">
+            <CreditCard size={20} />
+          </div>
+
+          <div>
+            <span>Credit Limits</span>
+            <strong>
+              {formatCurrency(totalCreditLimit)}
+            </strong>
+            <small>Available customer credit</small>
+          </div>
+        </div>
+
+        <div className="jesta-customers-stat">
+          <div className="jesta-customers-stat-icon owing">
+            <Wallet size={20} />
+          </div>
+
+          <div>
+            <span>Outstanding Balance</span>
+            <strong>
+              {formatCurrency(totalOutstanding)}
+            </strong>
+            <small>
+              {customersWithBalance} customer
+              {customersWithBalance === 1 ? "" : "s"} owing
+            </small>
+          </div>
+        </div>
+      </div>
+
+      {/* CUSTOMER TABLE CARD */}
+      <div className="jesta-customers-card">
+        <div className="jesta-customers-toolbar">
+          <div className="jesta-customers-toolbar-title">
+            <div className="jesta-customers-toolbar-icon">
+              <Users size={18} />
+            </div>
+
+            <div>
+              <h2>Customer Directory</h2>
+              <span>
+                {filteredCustomers.length} customer
+                {filteredCustomers.length === 1
+                  ? ""
+                  : "s"} displayed
+              </span>
+            </div>
+          </div>
+
+          <div className="jesta-customers-search">
             <Search size={18} />
 
             <input
               type="text"
-              placeholder="Search customers..."
+              placeholder="Search name, phone, email or PIN..."
               value={searchTerm}
               onChange={(event) =>
                 setSearchTerm(event.target.value)
               }
             />
+
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm("")}
+                aria-label="Clear search"
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
         </div>
 
         {loading ? (
-          <div className="customers-empty">
-            <RefreshCw
-              size={25}
-              className="spin"
-            />
-            <p>Loading customers...</p>
+          <div className="jesta-customers-empty">
+            <div className="jesta-customers-loading-icon">
+              <RefreshCw
+                size={28}
+                className="jesta-spin"
+              />
+            </div>
+
+            <h3>Loading customers...</h3>
+            <p>
+              Please wait while we load your customer
+              directory.
+            </p>
           </div>
         ) : filteredCustomers.length === 0 ? (
-          <div className="customers-empty">
-            <Users size={35} />
+          <div className="jesta-customers-empty">
+            <div className="jesta-customers-empty-icon">
+              <Users size={34} />
+            </div>
 
-            <h3>No customers found</h3>
+            <h3>
+              {searchTerm
+                ? "No customers found"
+                : "No customers yet"}
+            </h3>
 
             <p>
-              Add your first customer to get started.
+              {searchTerm
+                ? "Try a different search term."
+                : "Add your first customer to start building your customer directory."}
             </p>
 
-            <button
-              className="primary-button"
-              onClick={openAddModal}
-            >
-              <Plus size={17} />
-              Add Customer
-            </button>
+            {!searchTerm && (
+              <button
+                className="jesta-btn jesta-btn-primary"
+                onClick={openAddModal}
+              >
+                <Plus size={17} />
+                Add Customer
+              </button>
+            )}
           </div>
         ) : (
-          <div className="customers-table-wrapper">
-            <table className="customers-table">
+          <div className="jesta-customers-table-wrapper">
+            <table className="jesta-customers-table">
               <thead>
                 <tr>
                   <th>Customer</th>
@@ -413,232 +544,289 @@ function Customers() {
                   <th>Credit Limit</th>
                   <th>Balance</th>
                   <th>Status</th>
-                  <th>Actions</th>
+                  <th className="jesta-customers-actions-heading">
+                    Actions
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
-                {filteredCustomers.map(
-                  (customer) => {
-                    const balance =
-                      Number(
-                        customer.current_balance
-                      ) || 0;
+                {filteredCustomers.map((customer) => {
+                  const balance =
+                    Number(customer.current_balance) || 0;
 
-                    return (
-                      <tr key={customer.id}>
-                        <td>
-                          <div className="customer-name-cell">
-                            <div className="customer-avatar">
-                              {customer.name
-                                ?.charAt(0)
-                                ?.toUpperCase() || "C"}
-                            </div>
+                  const creditLimit =
+                    Number(customer.credit_limit) || 0;
 
-                            <div>
-                              <strong>
-                                {customer.name}
-                              </strong>
-
-                              {customer.tax_number && (
-                                <span>
-                                  PIN:{" "}
-                                  {customer.tax_number}
-                                </span>
-                              )}
-                            </div>
+                  return (
+                    <tr key={customer.id}>
+                      <td>
+                        <div className="jesta-customer-name-cell">
+                          <div className="jesta-customer-avatar">
+                            {customer.name
+                              ?.charAt(0)
+                              ?.toUpperCase() || "C"}
                           </div>
-                        </td>
 
-                        <td>
-                          <div className="customer-contact">
-                            {customer.phone && (
+                          <div className="jesta-customer-name-info">
+                            <strong>
+                              {customer.name}
+                            </strong>
+
+                            {customer.tax_number ? (
                               <span>
-                                <Phone size={13} />
-                                {customer.phone}
+                                PIN: {customer.tax_number}
+                              </span>
+                            ) : (
+                              <span>
+                                Customer #{customer.id}
                               </span>
                             )}
-
-                            {customer.email && (
-                              <span>
-                                <Mail size={13} />
-                                {customer.email}
-                              </span>
-                            )}
-
-                            {!customer.phone &&
-                              !customer.email && (
-                                <span>
-                                  No contact details
-                                </span>
-                              )}
                           </div>
-                        </td>
+                        </div>
+                      </td>
 
-                        <td>
-                          {formatCurrency(
-                            customer.credit_limit
+                      <td>
+                        <div className="jesta-customer-contact">
+                          {customer.phone && (
+                            <span>
+                              <Phone size={13} />
+                              {customer.phone}
+                            </span>
                           )}
-                        </td>
 
-                        <td>
-                          <span
-                            className={
-                              balance > 0
-                                ? "customer-balance owing"
-                                : "customer-balance"
+                          {customer.email && (
+                            <span>
+                              <Mail size={13} />
+                              {customer.email}
+                            </span>
+                          )}
+
+                          {!customer.phone &&
+                            !customer.email && (
+                              <span className="jesta-no-contact">
+                                No contact details
+                              </span>
+                            )}
+                        </div>
+                      </td>
+
+                      <td>
+                        <span className="jesta-customer-money">
+                          {formatCurrency(creditLimit)}
+                        </span>
+                      </td>
+
+                      <td>
+                        <span
+                          className={`jesta-customer-balance ${
+                            balance > 0
+                              ? "owing"
+                              : "clear"
+                          }`}
+                        >
+                          {formatCurrency(balance)}
+                        </span>
+                      </td>
+
+                      <td>
+                        <span className="jesta-customer-status">
+                          <span className="jesta-status-dot" />
+                          Active
+                        </span>
+                      </td>
+
+                      <td>
+                        <div className="jesta-customer-actions">
+                          <button
+                            className="jesta-customer-action edit"
+                            title="Edit customer"
+                            onClick={() =>
+                              openEditModal(customer)
                             }
                           >
-                            {formatCurrency(balance)}
-                          </span>
-                        </td>
+                            <Pencil size={16} />
+                          </button>
 
-                        <td>
-                          <span className="status-badge status-active">
-                            Active
-                          </span>
-                        </td>
-
-                        <td>
-                          <div className="table-actions">
-                            <button
-                              className="icon-button"
-                              title="Edit customer"
-                              onClick={() =>
-                                openEditModal(
-                                  customer
-                                )
-                              }
-                            >
-                              <Pencil size={16} />
-                            </button>
-
-                            <button
-                              className="icon-button danger"
-                              title="Deactivate customer"
-                              onClick={() =>
-                                deactivateCustomer(
-                                  customer
-                                )
-                              }
-                            >
-                              <UserX size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  }
-                )}
+                          <button
+                            className="jesta-customer-action deactivate"
+                            title="Deactivate customer"
+                            onClick={() =>
+                              deactivateCustomer(customer)
+                            }
+                          >
+                            <UserX size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
+      {/* CUSTOMER MODAL */}
       {showModal && (
-        <div className="modal-overlay">
-          <div className="customer-modal">
-            <div className="modal-header">
-              <div>
-                <h3>
-                  {editingCustomer
-                    ? "Edit Customer"
-                    : "Add Customer"}
-                </h3>
+        <div
+          className="jesta-customers-modal-overlay"
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              !saving
+            ) {
+              closeModal();
+            }
+          }}
+        >
+          <div className="jesta-customers-modal">
+            <div className="jesta-customers-modal-header">
+              <div className="jesta-customers-modal-title">
+                <div className="jesta-customers-modal-icon">
+                  {editingCustomer ? (
+                    <Pencil size={20} />
+                  ) : (
+                    <Plus size={20} />
+                  )}
+                </div>
 
-                <p>
-                  {editingCustomer
-                    ? "Update customer information."
-                    : "Enter the customer's information."}
-                </p>
+                <div>
+                  <h3>
+                    {editingCustomer
+                      ? "Edit Customer"
+                      : "Add Customer"}
+                  </h3>
+
+                  <p>
+                    {editingCustomer
+                      ? "Update the customer's information below."
+                      : "Enter the customer's information to create an account."}
+                  </p>
+                </div>
               </div>
 
               <button
-                className="modal-close"
+                className="jesta-customers-modal-close"
                 onClick={closeModal}
                 disabled={saving}
+                aria-label="Close modal"
               >
                 <X size={20} />
               </button>
             </div>
 
             <form onSubmit={saveCustomer}>
-              <div className="customer-form-grid">
-                <label>
-                  Customer Name *
+              <div className="jesta-customers-form">
+                <div className="jesta-customers-form-group">
+                  <label htmlFor="customer-name">
+                    Customer Name *
+                  </label>
+
                   <input
+                    id="customer-name"
                     name="name"
                     type="text"
                     placeholder="e.g. John Kamau"
                     value={form.name}
                     onChange={handleChange}
                     required
+                    autoFocus
                   />
-                </label>
+                </div>
 
-                <label>
-                  Phone
+                <div className="jesta-customers-form-group">
+                  <label htmlFor="customer-phone">
+                    Phone Number
+                  </label>
+
                   <input
+                    id="customer-phone"
                     name="phone"
                     type="text"
-                    placeholder="e.g. 0712345678"
+                    placeholder="e.g. 0712 345 678"
                     value={form.phone}
                     onChange={handleChange}
                   />
-                </label>
+                </div>
 
-                <label>
-                  Email
+                <div className="jesta-customers-form-group">
+                  <label htmlFor="customer-email">
+                    Email Address
+                  </label>
+
                   <input
+                    id="customer-email"
                     name="email"
                     type="email"
                     placeholder="customer@example.com"
                     value={form.email}
                     onChange={handleChange}
                   />
-                </label>
+                </div>
 
-                <label>
-                  Tax Number / KRA PIN
+                <div className="jesta-customers-form-group">
+                  <label htmlFor="customer-pin">
+                    Tax Number / KRA PIN
+                  </label>
+
                   <input
+                    id="customer-pin"
                     name="tax_number"
                     type="text"
                     placeholder="e.g. A012345678X"
                     value={form.tax_number}
                     onChange={handleChange}
                   />
-                </label>
+                </div>
 
-                <label className="full-width">
-                  Address
+                <div className="jesta-customers-form-group full-width">
+                  <label htmlFor="customer-address">
+                    Address
+                  </label>
+
                   <input
+                    id="customer-address"
                     name="address"
                     type="text"
                     placeholder="Customer address"
                     value={form.address}
                     onChange={handleChange}
                   />
-                </label>
+                </div>
 
-                <label>
-                  Credit Limit
-                  <input
-                    name="credit_limit"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={form.credit_limit}
-                    onChange={handleChange}
-                  />
-                </label>
+                <div className="jesta-customers-form-group">
+                  <label htmlFor="customer-credit-limit">
+                    Credit Limit
+                  </label>
+
+                  <div className="jesta-customer-input-money">
+                    <span>KSh</span>
+
+                    <input
+                      id="customer-credit-limit"
+                      name="credit_limit"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={form.credit_limit}
+                      onChange={handleChange}
+                    />
+                  </div>
+
+                  <small>
+                    Set to 0 for customers who do not
+                    purchase on credit.
+                  </small>
+                </div>
               </div>
 
-              <div className="modal-actions">
+              <div className="jesta-customers-modal-actions">
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="jesta-btn jesta-btn-secondary"
                   onClick={closeModal}
                   disabled={saving}
                 >
@@ -647,14 +835,14 @@ function Customers() {
 
                 <button
                   type="submit"
-                  className="primary-button"
+                  className="jesta-btn jesta-btn-primary"
                   disabled={saving}
                 >
                   {saving ? (
                     <>
                       <RefreshCw
                         size={17}
-                        className="spin"
+                        className="jesta-spin"
                       />
                       Saving...
                     </>

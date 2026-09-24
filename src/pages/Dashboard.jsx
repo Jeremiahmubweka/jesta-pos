@@ -5,137 +5,187 @@ import {
   Receipt,
   Truck,
   ArrowUpRight,
-  ArrowDownRight,
+  BarChart3,
+  AlertTriangle,
+  Plus,
 } from "lucide-react";
 
-function Dashboard() {
+function Dashboard({ setActivePage }) {
   const stats = [
     {
       title: "Today's Sales",
       value: "KSh 0.00",
       change: "No sales yet",
-      positive: true,
       icon: ShoppingCart,
+      className: "sales",
     },
     {
       title: "Inventory Value",
       value: "KSh 0.00",
       change: "Current stock value",
-      positive: true,
       icon: Package,
+      className: "inventory",
     },
     {
       title: "Today's Expenses",
       value: "KSh 0.00",
       change: "No expenses yet",
-      positive: true,
       icon: Receipt,
+      className: "expenses",
     },
     {
       title: "Today's Profit",
       value: "KSh 0.00",
       change: "Calculated from sales",
-      positive: true,
       icon: TrendingUp,
+      className: "profit",
     },
   ];
 
   return (
-    <div className="dashboard">
-      <div className="page-heading">
-        <div>
-          <h2>Dashboard</h2>
-          <p>
-            Welcome to JESTA POS. Here's an overview of your business.
-          </p>
+    <div className="jesta-dashboard-page">
+      <div className="jesta-dashboard-header">
+        <div className="jesta-dashboard-heading">
+          <div className="jesta-dashboard-brand-icon">
+            <BarChart3 size={22} />
+          </div>
+
+          <div>
+            <span className="jesta-dashboard-eyebrow">JESTA POS</span>
+            <h1>Dashboard</h1>
+            <p>Welcome back. Here's an overview of your business.</p>
+          </div>
         </div>
 
-        <button className="primary-button">
-          + New Sale
+        <button
+          type="button"
+          className="jesta-dashboard-new-sale"
+          onClick={() => setActivePage("Sales")}
+        >
+          <Plus size={16} />
+          New Sale
         </button>
       </div>
 
-      <div className="stats-grid">
+      <div className="jesta-dashboard-stats">
         {stats.map((stat) => {
           const Icon = stat.icon;
 
           return (
-            <div className="stat-card" key={stat.title}>
-              <div className="stat-top">
-                <div className="stat-icon">
-                  <Icon size={21} />
+            <div
+              key={stat.title}
+              className={`jesta-dashboard-stat-card ${stat.className}`}
+            >
+              <div className="jesta-dashboard-stat-top">
+                <div className="jesta-dashboard-stat-icon">
+                  <Icon size={20} />
                 </div>
 
-                <span className="stat-label">
+                <span className="jesta-dashboard-stat-period">
                   Today
                 </span>
               </div>
 
-              <h3>{stat.value}</h3>
+              <div className="jesta-dashboard-stat-content">
+                <span className="jesta-dashboard-stat-title">
+                  {stat.title}
+                </span>
 
-              <div className="stat-bottom">
-                {stat.positive ? (
-                  <ArrowUpRight size={15} />
-                ) : (
-                  <ArrowDownRight size={15} />
-                )}
+                <h2>{stat.value}</h2>
 
-                <span>{stat.change}</span>
+                <div className="jesta-dashboard-stat-change positive">
+                  <ArrowUpRight size={14} />
+                  <span>{stat.change}</span>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
 
-      <div className="dashboard-grid">
-        <section className="dashboard-card sales-overview">
-          <div className="card-heading">
+      <div className="jesta-dashboard-main-grid">
+        <section className="jesta-dashboard-card">
+          <div className="jesta-dashboard-card-header">
             <div>
+              <span className="jesta-dashboard-section-label">
+                PERFORMANCE
+              </span>
+
               <h3>Sales Overview</h3>
-              <p>Sales performance for the current period</p>
+
+              <p>
+                Sales performance for the current period
+              </p>
             </div>
 
-            <select className="period-select">
+            <select className="jesta-dashboard-period-select">
               <option>Last 7 days</option>
               <option>Last 30 days</option>
               <option>This year</option>
             </select>
           </div>
 
-          <div className="chart-placeholder">
-            <div className="chart-lines">
+          <div className="jesta-dashboard-chart">
+            <div className="jesta-dashboard-chart-grid">
               <span></span>
               <span></span>
               <span></span>
               <span></span>
             </div>
 
-            <div className="empty-chart">
-              <TrendingUp size={32} />
+            <div className="jesta-dashboard-empty-chart">
+              <div className="jesta-dashboard-empty-icon">
+                <TrendingUp size={25} />
+              </div>
+
               <strong>No sales data yet</strong>
+
               <p>
-                Your sales chart will appear here once transactions
-                are recorded.
+                Your sales chart will appear here once
+                transactions are recorded.
               </p>
+
+              <button
+                type="button"
+                className="jesta-dashboard-outline-button"
+                onClick={() => setActivePage("Sales")}
+              >
+                <ShoppingCart size={15} />
+                Start Making Sales
+              </button>
             </div>
           </div>
         </section>
 
-        <section className="dashboard-card">
-          <div className="card-heading">
+        <section className="jesta-dashboard-card">
+          <div className="jesta-dashboard-card-header">
             <div>
+              <span className="jesta-dashboard-section-label">
+                TRANSACTIONS
+              </span>
+
               <h3>Recent Sales</h3>
+
               <p>Latest transactions</p>
             </div>
 
-            <button className="text-button">
+            <button
+              type="button"
+              className="jesta-dashboard-text-button"
+              onClick={() => setActivePage("Sales")}
+            >
               View all
+              <ArrowUpRight size={14} />
             </button>
           </div>
 
-          <div className="empty-state">
-            <ShoppingCart size={30} />
+          <div className="jesta-dashboard-empty-state">
+            <div className="jesta-dashboard-empty-icon">
+              <ShoppingCart size={25} />
+            </div>
+
             <strong>No sales recorded</strong>
+
             <p>
               Completed sales will appear here.
             </p>
@@ -143,55 +193,138 @@ function Dashboard() {
         </section>
       </div>
 
-      <div className="dashboard-grid bottom-grid">
-        <section className="dashboard-card">
-          <div className="card-heading">
+      <div className="jesta-dashboard-bottom-grid">
+        <section className="jesta-dashboard-card">
+          <div className="jesta-dashboard-card-header">
             <div>
+              <span className="jesta-dashboard-section-label">
+                INVENTORY
+              </span>
+
               <h3>Low Stock Items</h3>
-              <p>Products that need attention</p>
+
+              <p>
+                Products that need attention
+              </p>
             </div>
 
-            <button className="text-button">
+            <button
+              type="button"
+              className="jesta-dashboard-text-button"
+              onClick={() => setActivePage("Inventory")}
+            >
               Inventory
+              <ArrowUpRight size={14} />
             </button>
           </div>
 
-          <div className="empty-state">
-            <Package size={30} />
+          <div className="jesta-dashboard-empty-state">
+            <div className="jesta-dashboard-empty-icon warning">
+              <AlertTriangle size={25} />
+            </div>
+
             <strong>No low-stock alerts</strong>
+
             <p>
               Products requiring restocking will appear here.
             </p>
           </div>
         </section>
 
-        <section className="dashboard-card">
-          <div className="card-heading">
+        <section className="jesta-dashboard-card">
+          <div className="jesta-dashboard-card-header">
             <div>
+              <span className="jesta-dashboard-section-label">
+                SHORTCUTS
+              </span>
+
               <h3>Quick Actions</h3>
-              <p>Common POS activities</p>
+
+              <p>
+                Common POS activities
+              </p>
             </div>
           </div>
 
-          <div className="quick-actions">
-            <button>
-              <ShoppingCart size={19} />
-              <span>New Sale</span>
+          <div className="jesta-dashboard-actions">
+            <button
+              type="button"
+              className="jesta-dashboard-action"
+              onClick={() => setActivePage("Sales")}
+            >
+              <span className="jesta-dashboard-action-icon">
+                <ShoppingCart size={18} />
+              </span>
+
+              <span className="jesta-dashboard-action-text">
+                <strong>New Sale</strong>
+                <span>Record a transaction</span>
+              </span>
+
+              <ArrowUpRight
+                size={15}
+                className="jesta-dashboard-action-arrow"
+              />
             </button>
 
-            <button>
-              <Package size={19} />
-              <span>Add Product</span>
+            <button
+              type="button"
+              className="jesta-dashboard-action product-action"
+              onClick={() => setActivePage("Inventory")}
+            >
+              <span className="jesta-dashboard-action-icon">
+                <Package size={18} />
+              </span>
+
+              <span className="jesta-dashboard-action-text">
+                <strong>Add Product</strong>
+                <span>Manage your stock</span>
+              </span>
+
+              <ArrowUpRight
+                size={15}
+                className="jesta-dashboard-action-arrow"
+              />
             </button>
 
-            <button>
-              <Truck size={19} />
-              <span>New Purchase</span>
+            <button
+              type="button"
+              className="jesta-dashboard-action purchase-action"
+              onClick={() => setActivePage("Purchases")}
+            >
+              <span className="jesta-dashboard-action-icon">
+                <Truck size={18} />
+              </span>
+
+              <span className="jesta-dashboard-action-text">
+                <strong>New Purchase</strong>
+                <span>Record incoming stock</span>
+              </span>
+
+              <ArrowUpRight
+                size={15}
+                className="jesta-dashboard-action-arrow"
+              />
             </button>
 
-            <button>
-              <Receipt size={19} />
-              <span>Add Expense</span>
+            <button
+              type="button"
+              className="jesta-dashboard-action expense-action"
+              onClick={() => setActivePage("Expenses")}
+            >
+              <span className="jesta-dashboard-action-icon">
+                <Receipt size={18} />
+              </span>
+
+              <span className="jesta-dashboard-action-text">
+                <strong>Add Expense</strong>
+                <span>Record a business expense</span>
+              </span>
+
+              <ArrowUpRight
+                size={15}
+                className="jesta-dashboard-action-arrow"
+              />
             </button>
           </div>
         </section>
