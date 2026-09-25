@@ -1,19 +1,22 @@
 import { useState } from "react";
-import { LogIn, Eye, EyeOff, AlertCircle } from "lucide-react";
+import {
+  LogIn,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  ShieldCheck,
+} from "lucide-react";
 import { supabase } from "../lib/supabase";
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
   const [showPassword, setShowPassword] = useState(false);
-
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
   const handleLogin = async (event) => {
     event.preventDefault();
-
     setErrorMessage("");
     setLoading(true);
 
@@ -24,10 +27,8 @@ function Login({ onLogin }) {
 
     if (error) {
       console.error("Login error:", error);
-
       setErrorMessage(error.message);
       setLoading(false);
-
       return;
     }
 
@@ -42,18 +43,18 @@ function Login({ onLogin }) {
 
   return (
     <div className="login-page">
-      <div className="login-card">
-        <div className="login-logo">
-          <div className="login-logo-mark">
-            J
-          </div>
+      <div className="login-background-shape login-background-shape-one"></div>
+      <div className="login-background-shape login-background-shape-two"></div>
 
-          <div>
+      <div className="login-card">
+        <div className="login-brand">
+          <div className="login-logo-mark">J</div>
+
+          <div className="login-brand-text">
             <h1>
               JESTA<span>.</span>
             </h1>
-
-            <p>Business Management System</p>
+            <p>BUSINESS MANAGEMENT SYSTEM</p>
           </div>
         </div>
 
@@ -69,43 +70,31 @@ function Login({ onLogin }) {
           </div>
         )}
 
-        <form onSubmit={handleLogin}>
+        <form onSubmit={handleLogin} className="login-form">
           <div className="login-field">
-            <label htmlFor="email">
-              Email address
-            </label>
+            <label htmlFor="email">Email address</label>
 
             <input
               id="email"
               type="email"
               placeholder="Enter your email"
               value={email}
-              onChange={(event) =>
-                setEmail(event.target.value)
-              }
+              onChange={(event) => setEmail(event.target.value)}
               required
               autoComplete="email"
             />
           </div>
 
           <div className="login-field">
-            <label htmlFor="password">
-              Password
-            </label>
+            <label htmlFor="password">Password</label>
 
             <div className="password-input">
               <input
                 id="password"
-                type={
-                  showPassword
-                    ? "text"
-                    : "password"
-                }
+                type={showPassword ? "text" : "password"}
                 placeholder="Enter your password"
                 value={password}
-                onChange={(event) =>
-                  setPassword(event.target.value)
-                }
+                onChange={(event) => setPassword(event.target.value)}
                 required
                 autoComplete="current-password"
               />
@@ -113,13 +102,9 @@ function Login({ onLogin }) {
               <button
                 type="button"
                 className="password-toggle"
-                onClick={() =>
-                  setShowPassword(!showPassword)
-                }
+                onClick={() => setShowPassword(!showPassword)}
                 aria-label={
-                  showPassword
-                    ? "Hide password"
-                    : "Show password"
+                  showPassword ? "Hide password" : "Show password"
                 }
               >
                 {showPassword ? (
@@ -137,7 +122,10 @@ function Login({ onLogin }) {
             disabled={loading}
           >
             {loading ? (
-              "Signing in..."
+              <span className="login-loading">
+                <span className="login-loading-spinner"></span>
+                Signing in...
+              </span>
             ) : (
               <>
                 <LogIn size={18} />
@@ -146,6 +134,11 @@ function Login({ onLogin }) {
             )}
           </button>
         </form>
+
+        <div className="login-security">
+          <ShieldCheck size={16} />
+          <span>Your business data is securely protected.</span>
+        </div>
 
         <div className="login-footer">
           <span>JESTA POS</span>

@@ -7524,3 +7524,2169 @@ a {
     margin: 0;
   }
 }
+/* =========================================================
+   JESTA AUTHENTICATION LOADING
+   ========================================================= */
+
+.jesta-auth-loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--jesta-bg);
+}
+
+.jesta-auth-loading-card {
+  width: min(360px, 100%);
+  padding: 36px 28px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius-lg);
+  background: var(--jesta-surface);
+  box-shadow: var(--jesta-shadow-lg);
+  text-align: center;
+}
+
+.jesta-auth-loading-logo {
+  color: var(--jesta-text);
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.jesta-auth-loading-logo span {
+  color: var(--jesta-primary);
+}
+
+.jesta-auth-spinner {
+  width: 30px;
+  height: 30px;
+  margin: 24px auto 14px;
+  border: 3px solid var(--jesta-primary-light);
+  border-top-color: var(--jesta-primary);
+  border-radius: 50%;
+  animation: jesta-auth-spin 0.8s linear infinite;
+}
+
+.jesta-auth-loading-card p {
+  margin: 0;
+  color: var(--jesta-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+@keyframes jesta-auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* =========================================================
+   JESTA POS LOGIN PAGE
+   ========================================================= */
+
+.login-page {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at 15% 15%,
+      rgba(15, 118, 110, 0.10),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 85% 85%,
+      rgba(245, 158, 11, 0.08),
+      transparent 30%
+    ),
+    var(--jesta-bg);
+}
+
+.login-background-shape {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.login-background-shape-one {
+  width: 420px;
+  height: 420px;
+  top: -220px;
+  right: -140px;
+  background: rgba(15, 118, 110, 0.07);
+}
+
+.login-background-shape-two {
+  width: 300px;
+  height: 300px;
+  bottom: -170px;
+  left: -120px;
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.login-card {
+  position: relative;
+  z-index: 2;
+  width: min(440px, 100%);
+  padding: 38px 38px 28px;
+  border: 1px solid var(--jesta-border);
+  border-radius: 16px;
+  background: var(--jesta-surface);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.10);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 34px;
+}
+
+.login-logo-mark {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  background: var(--jesta-primary);
+  color: white;
+  font-size: 25px;
+  font-weight: 900;
+  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.22);
+}
+
+.login-brand-text h1 {
+  margin: 0;
+  color: var(--jesta-text);
+  font-size: 27px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.login-brand-text h1 span {
+  color: var(--jesta-primary);
+}
+
+.login-brand-text p {
+  margin: 5px 0 0;
+  color: var(--jesta-text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.login-heading {
+  margin-bottom: 24px;
+}
+
+.login-heading h2 {
+  margin: 0;
+  color: var(--jesta-text);
+  font-size: 25px;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.login-heading p {
+  margin: 7px 0 0;
+  color: var(--jesta-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.login-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 18px;
+  padding: 11px 12px;
+  border: 1px solid #fecaca;
+  border-radius: var(--jesta-radius-sm);
+  background: #fef2f2;
+  color: var(--jesta-danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.login-error svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.login-field label {
+  color: var(--jesta-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.login-field input {
+  width: 100%;
+  height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--jesta-border-dark);
+  border-radius: var(--jesta-radius-sm);
+  outline: none;
+  background: var(--jesta-surface);
+  color: var(--jesta-text);
+  font-family: inherit;
+  font-size: 13px;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.login-field input::placeholder {
+  color: var(--jesta-text-light);
+}
+
+.login-field input:hover {
+  border-color: #94a3b8;
+}
+
+.login-field input:focus {
+  border-color: var(--jesta-primary);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.10);
+}
+
+.password-input {
+  position: relative;
+}
+
+.password-input input {
+  padding-right: 45px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--jesta-text-muted);
+  cursor: pointer;
+}
+
+.password-toggle:hover {
+  background: var(--jesta-surface-soft);
+  color: var(--jesta-primary);
+}
+
+.login-button {
+  width: 100%;
+  height: 45px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+  border: none;
+  border-radius: var(--jesta-radius-sm);
+  background: var(--jesta-primary);
+  color: white;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 5px 14px rgba(15, 118, 110, 0.18);
+  transition:
+    background 0.2s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.login-button:hover:not(:disabled) {
+  background: var(--jesta-primary-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 7px 18px rgba(15, 118, 110, 0.24);
+}
+
+.login-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.login-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.login-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.login-loading-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: jesta-login-spin 0.7s linear infinite;
+}
+
+@keyframes jesta-login-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.login-security {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 22px;
+  color: var(--jesta-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.login-security svg {
+  color: var(--jesta-success);
+}
+
+.login-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--jesta-border);
+  color: var(--jesta-text-light);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.login-footer span:first-child {
+  color: var(--jesta-text-secondary);
+  font-weight: 800;
+}
+
+@media (max-width: 520px) {
+  .login-page {
+    padding: 20px 14px;
+  }
+
+  .login-card {
+    padding: 30px 22px 24px;
+    border-radius: 14px;
+  }
+
+  .login-brand {
+    margin-bottom: 28px;
+  }
+
+  .login-heading h2 {
+    font-size: 22px;
+  }
+}
+/* =========================================================
+   JESTA SETTINGS ACTIVATION
+   ========================================================= */
+
+.jesta-settings-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: var(--jesta-radius);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.jesta-settings-alert svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.jesta-settings-alert-success {
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.jesta-settings-alert-error {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.jesta-settings-loading {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius-lg);
+  background: var(--jesta-surface);
+  color: var(--jesta-text-muted);
+  font-size: 13px;
+}
+
+.jesta-settings-spin {
+  animation: jesta-settings-spin 0.8s linear infinite;
+}
+
+@keyframes jesta-settings-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* SETTINGS PANEL */
+
+.jesta-settings-panel {
+  overflow: hidden;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius-lg);
+  background: var(--jesta-surface);
+  box-shadow: var(--jesta-shadow);
+}
+
+.jesta-settings-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--jesta-border);
+  background: var(--jesta-surface-soft);
+}
+
+.jesta-settings-panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.jesta-settings-panel-heading h3 {
+  margin: 0;
+  color: var(--jesta-text);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.jesta-settings-panel-heading p {
+  margin: 4px 0 0;
+  color: var(--jesta-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.jesta-settings-panel-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 11px;
+}
+
+.jesta-settings-close {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--jesta-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--jesta-text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.jesta-settings-close:hover {
+  border-color: var(--jesta-border-dark);
+  background: var(--jesta-surface-soft);
+  color: var(--jesta-text);
+}
+
+/* FORM */
+
+.jesta-settings-form {
+  padding: 24px;
+}
+
+.jesta-settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.jesta-settings-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.jesta-settings-field-full {
+  grid-column: 1 / -1;
+}
+
+.jesta-settings-field label {
+  color: var(--jesta-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.jesta-settings-field label span {
+  color: var(--jesta-danger);
+}
+
+.jesta-settings-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.jesta-settings-input-wrap > svg {
+  position: absolute;
+  left: 12px;
+  color: var(--jesta-text-muted);
+  pointer-events: none;
+}
+
+.jesta-settings-input-wrap input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px 0 38px;
+  border: 1px solid var(--jesta-border-dark);
+  border-radius: var(--jesta-radius-sm);
+  outline: none;
+  background: white;
+  color: var(--jesta-text);
+  font-family: inherit;
+  font-size: 13px;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.jesta-settings-input-wrap input::placeholder {
+  color: var(--jesta-text-light);
+}
+
+.jesta-settings-input-wrap input:focus {
+  border-color: var(--jesta-primary);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.09);
+}
+
+.jesta-settings-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--jesta-border);
+}
+
+.jesta-settings-primary-button,
+.jesta-settings-secondary-button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 15px;
+  border-radius: var(--jesta-radius-sm);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.jesta-settings-primary-button {
+  border: 1px solid var(--jesta-primary);
+  background: var(--jesta-primary);
+  color: white;
+}
+
+.jesta-settings-primary-button:hover:not(:disabled) {
+  border-color: var(--jesta-primary-dark);
+  background: var(--jesta-primary-dark);
+  transform: translateY(-1px);
+}
+
+.jesta-settings-primary-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.jesta-settings-secondary-button {
+  border: 1px solid var(--jesta-border-dark);
+  background: white;
+  color: var(--jesta-text-secondary);
+}
+
+.jesta-settings-secondary-button:hover {
+  border-color: var(--jesta-primary);
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+}
+
+/* USER ACCOUNT */
+
+.jesta-settings-account-card {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin: 24px;
+  padding: 18px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius);
+  background: var(--jesta-surface-soft);
+}
+
+.jesta-settings-account-avatar {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.jesta-settings-account-details {
+  min-width: 0;
+  flex: 1;
+}
+
+.jesta-settings-account-label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--jesta-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.jesta-settings-account-details strong {
+  display: block;
+  overflow: hidden;
+  color: var(--jesta-text);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jesta-settings-account-details p {
+  margin: 4px 0 0;
+  color: var(--jesta-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.jesta-settings-account-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  background: #f0fdf4;
+  color: #15803d;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.jesta-settings-user-info-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 24px 24px;
+}
+
+.jesta-settings-user-info-grid > div {
+  padding: 15px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius);
+  background: white;
+}
+
+.jesta-settings-user-info-grid span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--jesta-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.jesta-settings-user-info-grid strong {
+  color: var(--jesta-text);
+  font-size: 13px;
+}
+
+.jesta-settings-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin: 0 24px 24px;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--jesta-radius);
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.jesta-settings-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.jesta-settings-note strong {
+  display: block;
+  color: #1e40af;
+  font-size: 12px;
+}
+
+.jesta-settings-note p {
+  margin: 4px 0 0;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* SECURITY */
+
+.jesta-settings-security-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 24px;
+  padding: 15px;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--jesta-radius);
+  background: #f0fdf4;
+}
+
+.jesta-settings-security-status-icon {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.jesta-settings-security-status strong {
+  display: block;
+  color: #166534;
+  font-size: 13px;
+}
+
+.jesta-settings-security-status p {
+  margin: 3px 0 0;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.jesta-settings-security-form {
+  max-width: 620px;
+  padding: 0 24px 24px;
+}
+
+.jesta-settings-security-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+  color: var(--jesta-primary);
+}
+
+.jesta-settings-security-heading h4 {
+  margin: 0;
+  color: var(--jesta-text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.jesta-settings-security-heading p {
+  margin: 3px 0 0;
+  color: var(--jesta-text-muted);
+  font-size: 11px;
+}
+
+.jesta-settings-security-form .jesta-settings-field + .jesta-settings-field {
+  margin-top: 16px;
+}
+
+.jesta-settings-password-toggle {
+  position: absolute;
+  right: 7px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--jesta-text-muted);
+  cursor: pointer;
+}
+
+.jesta-settings-password-toggle:hover {
+  background: var(--jesta-surface-soft);
+  color: var(--jesta-primary);
+}
+
+/* SYSTEM */
+
+.jesta-settings-system-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 24px 24px 0;
+}
+
+.jesta-settings-system-overview-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 16px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius);
+  background: var(--jesta-surface-soft);
+}
+
+.jesta-settings-system-overview-icon {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary);
+}
+
+.jesta-settings-system-overview-item span {
+  display: block;
+  color: var(--jesta-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.jesta-settings-system-overview-item strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--jesta-text);
+  font-size: 13px;
+}
+
+.jesta-settings-system-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 20px 24px;
+  padding: 14px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius);
+  background: var(--jesta-surface-soft);
+  color: var(--jesta-text-muted);
+}
+
+.jesta-settings-system-message svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--jesta-info);
+}
+
+.jesta-settings-system-message strong {
+  display: block;
+  color: var(--jesta-text);
+  font-size: 12px;
+}
+
+.jesta-settings-system-message p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.jesta-settings-system-business-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 24px 24px;
+  padding: 10px 13px;
+  border: 1px solid var(--jesta-border-dark);
+  border-radius: var(--jesta-radius-sm);
+  background: white;
+  color: var(--jesta-text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.jesta-settings-system-business-button svg:last-child {
+  margin-left: 3px;
+}
+
+.jesta-settings-system-business-button:hover {
+  border-color: var(--jesta-primary);
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+}
+
+/* SETTINGS ICON COLORS */
+
+.jesta-settings-icon-business {
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary);
+}
+
+.jesta-settings-icon-users {
+  background: #dbeafe;
+  color: var(--jesta-info);
+}
+
+.jesta-settings-icon-security {
+  background: #dcfce7;
+  color: var(--jesta-success);
+}
+
+.jesta-settings-icon-system {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+/* RESPONSIVE */
+
+@media (max-width: 760px) {
+  .jesta-settings-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .jesta-settings-field-full {
+    grid-column: auto;
+  }
+
+  .jesta-settings-user-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .jesta-settings-system-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .jesta-settings-account-card {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .jesta-settings-account-status {
+    margin-left: 63px;
+  }
+}
+
+@media (max-width: 560px) {
+  .jesta-settings-panel-header {
+    padding: 18px;
+  }
+
+  .jesta-settings-panel-heading {
+    align-items: flex-start;
+  }
+
+  .jesta-settings-panel-heading h3 {
+    font-size: 15px;
+  }
+
+  .jesta-settings-form {
+    padding: 18px;
+  }
+
+  .jesta-settings-form-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .jesta-settings-primary-button,
+  .jesta-settings-secondary-button {
+    width: 100%;
+  }
+
+  .jesta-settings-account-card {
+    margin: 18px;
+  }
+
+  .jesta-settings-user-info-grid {
+    padding: 0 18px 18px;
+  }
+
+  .jesta-settings-note {
+    margin: 0 18px 18px;
+  }
+
+  .jesta-settings-security-status {
+    margin: 18px;
+  }
+
+  .jesta-settings-security-form {
+    padding: 0 18px 18px;
+  }
+
+  .jesta-settings-system-overview {
+    padding: 18px 18px 0;
+  }
+
+  .jesta-settings-system-message {
+    margin: 18px;
+  }
+
+  .jesta-settings-system-business-button {
+    margin: 0 18px 18px;
+  }
+}
+/* =========================================================
+   JESTA SETTINGS PAGE
+   ========================================================= */
+
+.jesta-settings-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 24px 20px;
+  padding: 13px 15px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--jesta-shadow-sm);
+}
+
+.jesta-settings-alert span {
+  flex: 1;
+}
+
+.jesta-settings-alert button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.jesta-settings-alert button:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.jesta-settings-alert-success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.jesta-settings-alert-success svg {
+  color: var(--jesta-success);
+}
+
+.jesta-settings-alert-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.jesta-settings-alert-error svg {
+  color: var(--jesta-danger);
+}
+
+
+/* =========================================================
+   SETTINGS LAYOUT
+   ========================================================= */
+
+.jesta-settings-layout {
+  display: grid;
+  grid-template-columns: 245px minmax(0, 1fr);
+  gap: 22px;
+  padding: 0 24px 30px;
+}
+
+.jesta-settings-sidebar {
+  align-self: start;
+  position: sticky;
+  top: 92px;
+  padding: 8px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius-lg);
+  background: var(--jesta-surface);
+  box-shadow: var(--jesta-shadow-sm);
+}
+
+.jesta-settings-sidebar-title {
+  padding: 10px 12px 9px;
+  color: var(--jesta-text-light);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.jesta-settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.jesta-settings-nav-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 11px;
+  padding: 11px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--jesta-text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.jesta-settings-nav-item:hover {
+  border-color: var(--jesta-border);
+  background: var(--jesta-surface-soft);
+  color: var(--jesta-text);
+}
+
+.jesta-settings-nav-item-active {
+  border-color: rgba(15, 118, 110, 0.14);
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+}
+
+.jesta-settings-nav-item-active:hover {
+  border-color: rgba(15, 118, 110, 0.14);
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+}
+
+.jesta-settings-nav-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--jesta-surface-soft);
+  color: var(--jesta-text-muted);
+}
+
+.jesta-settings-nav-icon-active {
+  background: var(--jesta-primary);
+  color: white;
+}
+
+.jesta-settings-nav-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.jesta-settings-nav-text strong {
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.jesta-settings-nav-text span {
+  overflow: hidden;
+  color: var(--jesta-text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jesta-settings-nav-item-active .jesta-settings-nav-text span {
+  color: var(--jesta-primary-dark);
+  opacity: 0.75;
+}
+
+
+/* =========================================================
+   SETTINGS CONTENT
+   ========================================================= */
+
+.jesta-settings-content {
+  min-width: 0;
+}
+
+.jesta-settings-panel {
+  overflow: hidden;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius-lg);
+  background: var(--jesta-surface);
+  box-shadow: var(--jesta-shadow);
+}
+
+.jesta-settings-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--jesta-border);
+}
+
+.jesta-settings-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+
+.jesta-settings-panel-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+}
+
+.jesta-settings-panel-heading h2 {
+  margin: 1px 0 4px;
+  color: var(--jesta-text);
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.jesta-settings-panel-heading p {
+  margin: 0;
+  color: var(--jesta-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.jesta-settings-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--jesta-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--jesta-text-secondary);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.jesta-settings-close:hover {
+  border-color: var(--jesta-primary);
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+}
+
+
+/* =========================================================
+   SETTINGS FORM
+   ========================================================= */
+
+.jesta-settings-form {
+  padding: 24px;
+}
+
+.jesta-settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.jesta-settings-field {
+  min-width: 0;
+}
+
+.jesta-settings-field-full {
+  grid-column: 1 / -1;
+}
+
+.jesta-settings-field label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--jesta-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.jesta-settings-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--jesta-border);
+  border-radius: 8px;
+  background: white;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.jesta-settings-input-wrap svg {
+  flex-shrink: 0;
+  color: var(--jesta-text-light);
+}
+
+.jesta-settings-input-wrap:focus-within {
+  border-color: var(--jesta-primary);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.10);
+}
+
+.jesta-settings-input-wrap:focus-within svg {
+  color: var(--jesta-primary);
+}
+
+.jesta-settings-input-wrap input {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--jesta-text);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.jesta-settings-input-wrap input::placeholder {
+  color: var(--jesta-text-light);
+}
+
+.jesta-settings-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 1px solid var(--jesta-border);
+}
+
+.jesta-settings-primary-button,
+.jesta-settings-secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.jesta-settings-primary-button {
+  border: 1px solid var(--jesta-primary);
+  background: var(--jesta-primary);
+  color: white;
+  box-shadow: var(--jesta-shadow-sm);
+}
+
+.jesta-settings-primary-button:hover {
+  border-color: var(--jesta-primary-dark);
+  background: var(--jesta-primary-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--jesta-shadow);
+}
+
+.jesta-settings-primary-button:disabled,
+.jesta-settings-secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+}
+
+.jesta-settings-secondary-button {
+  border: 1px solid var(--jesta-border);
+  background: white;
+  color: var(--jesta-text-secondary);
+}
+
+.jesta-settings-secondary-button:hover {
+  border-color: var(--jesta-border-dark);
+  background: var(--jesta-surface-soft);
+  color: var(--jesta-text);
+}
+
+.jesta-settings-button-spinner,
+.jesta-settings-loading-icon {
+  animation: jesta-settings-spin 0.8s linear infinite;
+}
+
+@keyframes jesta-settings-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+/* =========================================================
+   SETTINGS LOADING
+   ========================================================= */
+
+.jesta-settings-loading {
+  display: flex;
+  min-height: 320px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--jesta-text-muted);
+}
+
+.jesta-settings-loading p {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+
+/* =========================================================
+   USERS / ACCOUNT
+   ========================================================= */
+
+.jesta-settings-account-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 24px;
+  padding: 18px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius);
+  background: var(--jesta-surface-soft);
+}
+
+.jesta-settings-account-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.jesta-settings-account-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.jesta-settings-account-details h3 {
+  margin: 0 0 3px;
+  color: var(--jesta-text);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.jesta-settings-account-details p {
+  overflow: hidden;
+  margin: 0;
+  color: var(--jesta-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jesta-settings-account-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: #f0fdf4;
+  color: #15803d;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.jesta-settings-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 0 24px 24px;
+}
+
+.jesta-settings-info-card {
+  padding: 15px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius);
+  background: white;
+}
+
+.jesta-settings-info-card span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--jesta-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.jesta-settings-info-card strong {
+  display: block;
+  overflow: hidden;
+  color: var(--jesta-text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* =========================================================
+   SECURITY
+   ========================================================= */
+
+.jesta-settings-security-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  margin-bottom: 24px;
+  padding: 15px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius);
+  background: var(--jesta-surface-soft);
+}
+
+.jesta-settings-security-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+}
+
+.jesta-settings-security-header h3 {
+  margin: 1px 0 4px;
+  color: var(--jesta-text);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.jesta-settings-security-header p {
+  margin: 0;
+  color: var(--jesta-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.jesta-settings-password-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.jesta-settings-password-rules div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--jesta-text-muted);
+  font-size: 11px;
+}
+
+.jesta-settings-password-rules svg {
+  color: var(--jesta-success);
+}
+
+
+/* =========================================================
+   SYSTEM
+   ========================================================= */
+
+.jesta-settings-system-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 24px;
+}
+
+.jesta-settings-system-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 17px;
+  border: 1px solid var(--jesta-border);
+  border-radius: var(--jesta-radius);
+  background: white;
+}
+
+.jesta-settings-system-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+}
+
+.jesta-settings-system-card span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--jesta-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.jesta-settings-system-card strong {
+  display: block;
+  color: var(--jesta-text);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.jesta-settings-system-card p {
+  margin: 5px 0 0;
+  color: var(--jesta-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+
+/* =========================================================
+   SETTINGS NOTICE
+   ========================================================= */
+
+.jesta-settings-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin: 0 24px 24px;
+  padding: 14px 15px;
+  border: 1px solid #bae6fd;
+  border-radius: var(--jesta-radius);
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+.jesta-settings-notice > svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.jesta-settings-notice strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #075985;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.jesta-settings-notice p {
+  margin: 0;
+  color: #0369a1;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+
+/* =========================================================
+   SETTINGS RESPONSIVE
+   ========================================================= */
+
+@media (max-width: 900px) {
+  .jesta-settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .jesta-settings-sidebar {
+    position: static;
+  }
+
+  .jesta-settings-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .jesta-settings-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .jesta-settings-field-full {
+    grid-column: auto;
+  }
+
+  .jesta-settings-system-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .jesta-settings-layout {
+    gap: 14px;
+    padding: 0 14px 24px;
+  }
+
+  .jesta-settings-alert {
+    margin: 0 14px 16px;
+  }
+
+  .jesta-settings-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .jesta-settings-panel-header {
+    padding: 18px;
+  }
+
+  .jesta-settings-form {
+    padding: 18px;
+  }
+
+  .jesta-settings-info-grid {
+    grid-template-columns: 1fr;
+    padding: 0 18px 18px;
+  }
+
+  .jesta-settings-account-card {
+    margin: 18px;
+  }
+
+  .jesta-settings-system-grid {
+    padding: 18px;
+  }
+
+  .jesta-settings-notice {
+    margin: 0 18px 18px;
+  }
+
+  .jesta-settings-form-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .jesta-settings-primary-button,
+  .jesta-settings-secondary-button {
+    width: 100%;
+  }
+
+  .jesta-settings-account-status {
+    display: none;
+  }
+}
+/* =========================================================
+   JESTA PHONE BARCODE SCANNER
+   ========================================================= */
+
+.jesta-phone-scan-button {
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+}
+
+.jesta-phone-scan-button:hover {
+  border-color: rgba(15, 118, 110, 0.30);
+  background: #bff7ee;
+  transform: translateY(-1px);
+}
+
+.jesta-camera-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(5px);
+}
+
+.jesta-camera-modal {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  border: 1px solid var(--jesta-border);
+  border-radius: 16px;
+  background: white;
+  box-shadow: var(--jesta-shadow-lg);
+}
+
+.jesta-camera-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--jesta-border);
+}
+
+.jesta-camera-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--jesta-text);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.jesta-camera-title svg {
+  color: var(--jesta-primary);
+}
+
+.jesta-camera-header p {
+  margin: 5px 0 0;
+  color: var(--jesta-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.jesta-camera-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--jesta-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--jesta-text-secondary);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.jesta-camera-close:hover {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: var(--jesta-danger);
+}
+
+.jesta-camera-body {
+  padding: 20px;
+}
+
+.jesta-camera-view {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  background: #020617;
+}
+
+.jesta-camera-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.jesta-camera-frame {
+  position: absolute;
+  left: 12%;
+  top: 25%;
+  width: 76%;
+  height: 50%;
+  pointer-events: none;
+}
+
+.jesta-camera-frame .corner {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-color: white;
+  border-style: solid;
+}
+
+.jesta-camera-frame .top-left {
+  left: 0;
+  top: 0;
+  border-width: 3px 0 0 3px;
+}
+
+.jesta-camera-frame .top-right {
+  right: 0;
+  top: 0;
+  border-width: 3px 3px 0 0;
+}
+
+.jesta-camera-frame .bottom-left {
+  left: 0;
+  bottom: 0;
+  border-width: 0 0 3px 3px;
+}
+
+.jesta-camera-frame .bottom-right {
+  right: 0;
+  bottom: 0;
+  border-width: 0 3px 3px 0;
+}
+
+.jesta-camera-scan-line {
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  top: 50%;
+  height: 2px;
+  background: var(--jesta-primary);
+  box-shadow:
+    0 0 8px rgba(20, 184, 166, 0.9),
+    0 0 18px rgba(20, 184, 166, 0.55);
+  animation: jesta-camera-scan 2s ease-in-out infinite;
+}
+
+@keyframes jesta-camera-scan {
+  0%,
+  100% {
+    transform: translateY(-45px);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: translateY(45px);
+    opacity: 1;
+  }
+}
+
+.jesta-camera-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(2, 6, 23, 0.45);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.jesta-camera-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-height: 42px;
+  margin-top: 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--jesta-border);
+  border-radius: 9px;
+  background: var(--jesta-surface-soft);
+  color: var(--jesta-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.jesta-camera-status svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--jesta-primary);
+}
+
+.jesta-camera-retry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 10px;
+  border: 1px solid var(--jesta-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--jesta-text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.jesta-camera-retry:hover {
+  border-color: var(--jesta-primary);
+  background: var(--jesta-primary-light);
+  color: var(--jesta-primary-dark);
+}
+
+.jesta-camera-help {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #bae6fd;
+  border-radius: 9px;
+  background: #f0f9ff;
+}
+
+.jesta-camera-help-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: white;
+  color: var(--jesta-info);
+}
+
+.jesta-camera-help strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #075985;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.jesta-camera-help p {
+  margin: 0;
+  color: #0369a1;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.jesta-camera-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 20px;
+  border-top: 1px solid var(--jesta-border);
+  background: var(--jesta-surface-soft);
+}
+
+.jesta-camera-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--jesta-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--jesta-text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.jesta-camera-cancel:hover {
+  border-color: var(--jesta-border-dark);
+  background: var(--jesta-surface-soft);
+  color: var(--jesta-text);
+}
+
+@media (max-width: 640px) {
+  .jesta-camera-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .jesta-camera-modal {
+    width: 100%;
+    max-height: 94vh;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .jesta-camera-body {
+    padding: 14px;
+  }
+
+  .jesta-camera-view {
+    aspect-ratio: 3 / 4;
+  }
+
+  .jesta-camera-frame {
+    left: 8%;
+    width: 84%;
+    top: 30%;
+    height: 40%;
+  }
+
+  .jesta-camera-footer {
+    padding: 12px 14px;
+  }
+
+  .jesta-camera-cancel {
+    width: 100%;
+  }
+}
