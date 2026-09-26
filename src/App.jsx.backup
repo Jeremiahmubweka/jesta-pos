@@ -12,9 +12,7 @@ import Customers from "./pages/Customers";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 
-import { ThemeProvider } from "./theme/ThemeProvider";
-
-function AppContent() {
+function App() {
   const [session, setSession] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -91,9 +89,7 @@ function AppContent() {
       }
 
       if (!data) {
-        console.error(
-          "No user profile found for this account."
-        );
+        console.error("No user profile found for this account.");
 
         await supabase.auth.signOut({
           scope: "local",
@@ -108,9 +104,7 @@ function AppContent() {
       }
 
       if (!data.is_active) {
-        console.error(
-          "This user account is inactive."
-        );
+        console.error("This user account is inactive.");
 
         await supabase.auth.signOut({
           scope: "local",
@@ -192,11 +186,7 @@ function AppContent() {
   const renderPage = () => {
     switch (activePage) {
       case "Dashboard":
-        return (
-          <Dashboard
-            setActivePage={setActivePage}
-          />
-        );
+        return <Dashboard setActivePage={setActivePage} />;
 
       case "Sales":
         return <Sales />;
@@ -205,50 +195,22 @@ function AppContent() {
         return <Inventory />;
 
       case "Purchases":
-        return userRole === "admin" ? (
-          <Purchases />
-        ) : (
-          <Dashboard
-            setActivePage={setActivePage}
-          />
-        );
+        return userRole === "admin" ? <Purchases /> : <Dashboard setActivePage={setActivePage} />;
 
       case "Expenses":
-        return userRole === "admin" ? (
-          <Expenses />
-        ) : (
-          <Dashboard
-            setActivePage={setActivePage}
-          />
-        );
+        return userRole === "admin" ? <Expenses /> : <Dashboard setActivePage={setActivePage} />;
 
       case "Customers":
         return <Customers />;
 
       case "Reports":
-        return userRole === "admin" ? (
-          <Reports />
-        ) : (
-          <Dashboard
-            setActivePage={setActivePage}
-          />
-        );
+        return userRole === "admin" ? <Reports /> : <Dashboard setActivePage={setActivePage} />;
 
       case "Settings":
-        return userRole === "admin" ? (
-          <Settings />
-        ) : (
-          <Dashboard
-            setActivePage={setActivePage}
-          />
-        );
+        return userRole === "admin" ? <Settings /> : <Dashboard setActivePage={setActivePage} />;
 
       default:
-        return (
-          <Dashboard
-            setActivePage={setActivePage}
-          />
-        );
+        return <Dashboard setActivePage={setActivePage} />;
     }
   };
 
@@ -262,14 +224,6 @@ function AppContent() {
     >
       {renderPage()}
     </Layout>
-  );
-}
-
-function App() {
-  return (
-    <ThemeProvider>
-      <AppContent />
-    </ThemeProvider>
   );
 }
 

@@ -4,9 +4,9 @@ import {
   Users,
   ShieldCheck,
   Settings as SettingsIcon,
+  Palette,
   Save,
   Lock,
-  UserCircle,
   Mail,
   Phone,
   MapPin,
@@ -16,17 +16,25 @@ import {
   Loader2,
   X,
   RefreshCw,
+  Check,
+  UserPlus,
+  UserX,
+  UserCheck,
 } from "lucide-react";
 
 import { supabase } from "../lib/supabase";
+import { useTheme } from "../theme/ThemeProvider";
 
 function Settings() {
-  const [activeSection, setActiveSection] = useState("Business");
+  const [activeSection, setActiveSection] =
+    useState("Business");
 
   const [businessId, setBusinessId] = useState(null);
   const [business, setBusiness] = useState(null);
-  const [loadingBusiness, setLoadingBusiness] = useState(true);
-  const [savingBusiness, setSavingBusiness] = useState(false);
+  const [loadingBusiness, setLoadingBusiness] =
+    useState(true);
+  const [savingBusiness, setSavingBusiness] =
+    useState(false);
 
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -42,41 +50,90 @@ function Settings() {
     timezone: "Africa/Nairobi",
   });
 
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] =
+    useState(null);
+
+  /*
+   * Employee management
+   */
+  const [employees, setEmployees] = useState([]);
+  const [loadingEmployees, setLoadingEmployees] =
+    useState(false);
+
+  const [employeeModalOpen, setEmployeeModalOpen] =
+    useState(false);
+
+  const [savingEmployee, setSavingEmployee] =
+    useState(false);
+
+  const [employeeActionId, setEmployeeActionId] =
+    useState(null);
+
+  const [employeeForm, setEmployeeForm] = useState({
+    full_name: "",
+    email: "",
+    phone: "",
+    password: "",
+  });
 
   const [passwordForm, setPasswordForm] = useState({
     newPassword: "",
     confirmPassword: "",
   });
 
-  const [updatingPassword, setUpdatingPassword] = useState(false);
+  const [updatingPassword, setUpdatingPassword] =
+    useState(false);
+
+  /*
+   * JESTA Theme System
+   */
+  const {
+    themeId,
+    themes,
+    changeTheme,
+    loadingTheme,
+  } = useTheme();
+
+  const [changingTheme, setChangingTheme] =
+    useState(false);
 
   const settingsSections = [
     {
       name: "Business",
       icon: Building2,
-      description: "Manage your business information",
+      description:
+        "Manage your business information",
     },
     {
       name: "Users",
       icon: Users,
-      description: "View account and access information",
+      description:
+        "Manage employees and access",
     },
     {
       name: "Security",
       icon: ShieldCheck,
-      description: "Manage your account security",
+      description:
+        "Manage your account security",
+    },
+    {
+      name: "Appearance",
+      icon: Palette,
+      description:
+        "Customize your JESTA POS theme",
     },
     {
       name: "System",
       icon: SettingsIcon,
-      description: "View system configuration",
+      description:
+        "View system configuration",
     },
   ];
 
   useEffect(() => {
     loadBusiness();
     loadCurrentUser();
+    loadEmployees();
   }, []);
 
   const clearMessages = () => {
@@ -85,10 +142,14 @@ function Settings() {
   };
 
   const loadCurrentUser = async () => {
-    const { data, error } = await supabase.auth.getUser();
+    const { data, error } =
+      await supabase.auth.getUser();
 
     if (error) {
-      console.error("Current user error:", error);
+      console.error(
+        "Current user error:",
+        error
+      );
       return;
     }
 
@@ -103,7 +164,9 @@ function Settings() {
       const {
         data: businessIdData,
         error: businessIdError,
-      } = await supabase.rpc("get_my_business_id");
+      } = await supabase.rpc(
+        "get_my_business_id"
+      );
 
       if (businessIdError) {
         console.error(
@@ -118,7 +181,8 @@ function Settings() {
         return;
       }
 
-      const resolvedBusinessId = Number(businessIdData);
+      const resolvedBusinessId =
+        Number(businessIdData);
 
       if (!resolvedBusinessId) {
         setErrorMessage(
@@ -137,7 +201,10 @@ function Settings() {
         .single();
 
       if (error) {
-        console.error("Business loading error:", error);
+        console.error(
+          "Business loading error:",
+          error
+        );
 
         setErrorMessage(
           "Unable to load your business information."
@@ -158,16 +225,24 @@ function Settings() {
 
       setBusinessForm({
         name: data.name || "",
-        business_type: data.business_type || "",
+        business_type:
+          data.business_type || "",
         phone: data.phone || "",
         email: data.email || "",
         address: data.address || "",
-        tax_number: data.tax_number || "",
-        currency: data.currency || "KES",
-        timezone: data.timezone || "Africa/Nairobi",
+        tax_number:
+          data.tax_number || "",
+        currency:
+          data.currency || "KES",
+        timezone:
+          data.timezone ||
+          "Africa/Nairobi",
       });
     } catch (error) {
-      console.error("Unexpected business loading error:", error);
+      console.error(
+        "Unexpected business loading error:",
+        error
+      );
 
       setErrorMessage(
         "Something went wrong while loading business information."
@@ -177,8 +252,280 @@ function Settings() {
     }
   };
 
+  /*
+   * Employee loading
+   */
+  const loadEmployees = async () => {
+    setLoadingEmployees(true);
+
+    try {
+      const { data, error } =
+        await supabase.functions.invoke(
+          "manage-employees",
+          {
+            body: {
+              action: "list",
+            },
+          }
+        );
+
+      if (error) {
+        console.error(
+          "Employee loading error:",
+          error
+        );
+
+        setErrorMessage(
+          error.message ||
+            "Unable to load employees."
+        );
+
+        return;
+      }
+
+      if (data?.error) {
+        setErrorMessage(data.error);
+        return;
+      }
+
+      setEmployees(
+        Array.isArray(data?.employees)
+          ? data.employees
+          : []
+      );
+    } catch (error) {
+      console.error(
+        "Unexpected employee loading error:",
+        error
+      );
+
+      setErrorMessage(
+        "Something went wrong while loading employees."
+      );
+    } finally {
+      setLoadingEmployees(false);
+    }
+  };
+
+  const handleEmployeeFormChange = (
+    event
+  ) => {
+    const { name, value } =
+      event.target;
+
+    setEmployeeForm((previous) => ({
+      ...previous,
+      [name]: value,
+    }));
+
+    clearMessages();
+  };
+
+  const resetEmployeeForm = () => {
+    setEmployeeForm({
+      full_name: "",
+      email: "",
+      phone: "",
+      password: "",
+    });
+  };
+
+  const handleOpenEmployeeModal = () => {
+    clearMessages();
+    resetEmployeeForm();
+    setEmployeeModalOpen(true);
+  };
+
+  const handleCloseEmployeeModal = () => {
+    if (savingEmployee) {
+      return;
+    }
+
+    setEmployeeModalOpen(false);
+    resetEmployeeForm();
+  };
+
+  const handleCreateEmployee = async (
+    event
+  ) => {
+    event.preventDefault();
+
+    clearMessages();
+
+    const {
+      full_name,
+      email,
+      phone,
+      password,
+    } = employeeForm;
+
+    if (!full_name.trim()) {
+      setErrorMessage(
+        "Employee full name is required."
+      );
+      return;
+    }
+
+    if (!email.trim()) {
+      setErrorMessage(
+        "Employee email is required."
+      );
+      return;
+    }
+
+    if (password.length < 8) {
+      setErrorMessage(
+        "Employee password must be at least 8 characters long."
+      );
+      return;
+    }
+
+    setSavingEmployee(true);
+
+    try {
+      const { data, error } =
+        await supabase.functions.invoke(
+          "manage-employees",
+          {
+            body: {
+              action: "create",
+              full_name:
+                full_name.trim(),
+              email:
+                email.trim().toLowerCase(),
+              phone:
+                phone.trim() || null,
+              password,
+            },
+          }
+        );
+
+      if (error) {
+        console.error(
+          "Employee creation error:",
+          error
+        );
+
+        setErrorMessage(
+          error.message ||
+            "Unable to create employee."
+        );
+
+        return;
+      }
+
+      if (data?.error) {
+        setErrorMessage(data.error);
+        return;
+      }
+
+      setEmployeeModalOpen(false);
+      resetEmployeeForm();
+
+      await loadEmployees();
+
+      setMessage(
+        "Employee account created successfully."
+      );
+    } catch (error) {
+      console.error(
+        "Unexpected employee creation error:",
+        error
+      );
+
+      setErrorMessage(
+        "Something went wrong while creating the employee account."
+      );
+    } finally {
+      setSavingEmployee(false);
+    }
+  };
+
+  const handleEmployeeStatusToggle = async (
+    employee
+  ) => {
+    clearMessages();
+
+    const isCurrentlyActive =
+      employee.is_active;
+
+    const action = isCurrentlyActive
+      ? "deactivate"
+      : "reactivate";
+
+    const confirmationMessage =
+      isCurrentlyActive
+        ? `Deactivate ${employee.full_name}? They will no longer be able to access this JESTA POS business.`
+        : `Reactivate ${employee.full_name}? They will regain access to this JESTA POS business.`;
+
+    const confirmed =
+      window.confirm(
+        confirmationMessage
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setEmployeeActionId(
+      employee.id
+    );
+
+    try {
+      const { data, error } =
+        await supabase.functions.invoke(
+          "manage-employees",
+          {
+            body: {
+              action,
+              user_id: employee.id,
+            },
+          }
+        );
+
+      if (error) {
+        console.error(
+          "Employee status update error:",
+          error
+        );
+
+        setErrorMessage(
+          error.message ||
+            `Unable to ${action} employee.`
+        );
+
+        return;
+      }
+
+      if (data?.error) {
+        setErrorMessage(data.error);
+        return;
+      }
+
+      await loadEmployees();
+
+      setMessage(
+        isCurrentlyActive
+          ? "Employee account deactivated successfully."
+          : "Employee account reactivated successfully."
+      );
+    } catch (error) {
+      console.error(
+        "Unexpected employee status error:",
+        error
+      );
+
+      setErrorMessage(
+        `Something went wrong while trying to ${action} the employee.`
+      );
+    } finally {
+      setEmployeeActionId(null);
+    }
+  };
+
   const handleBusinessChange = (event) => {
-    const { name, value } = event.target;
+    const { name, value } =
+      event.target;
 
     setBusinessForm((previous) => ({
       ...previous,
@@ -188,7 +535,9 @@ function Settings() {
     clearMessages();
   };
 
-  const handleSaveBusiness = async (event) => {
+  const handleSaveBusiness = async (
+    event
+  ) => {
     event.preventDefault();
 
     clearMessages();
@@ -202,59 +551,59 @@ function Settings() {
     }
 
     if (!businessForm.name.trim()) {
-      setErrorMessage("Business name is required.");
+      setErrorMessage(
+        "Business name is required."
+      );
+
       return;
     }
 
     setSavingBusiness(true);
 
     try {
-      /*
-       * Important:
-       * We intentionally do NOT use .select().single()
-       * after the update.
-       *
-       * Supabase can return:
-       * "Cannot coerce the result to a single JSON object"
-       *
-       * when the update response does not contain exactly
-       * one returned row.
-       *
-       * We already have the values in businessForm, so we
-       * only need to confirm that the update itself succeeds.
-       */
       const { error } = await supabase
         .from("businesses")
         .update({
           name: businessForm.name.trim(),
           business_type:
-            businessForm.business_type.trim() || null,
-          phone: businessForm.phone.trim() || null,
-          email: businessForm.email.trim() || null,
-          address: businessForm.address.trim() || null,
+            businessForm.business_type.trim() ||
+            null,
+          phone:
+            businessForm.phone.trim() ||
+            null,
+          email:
+            businessForm.email.trim() ||
+            null,
+          address:
+            businessForm.address.trim() ||
+            null,
           tax_number:
-            businessForm.tax_number.trim() || null,
+            businessForm.tax_number.trim() ||
+            null,
           currency:
-            businessForm.currency.trim() || "KES",
+            businessForm.currency.trim() ||
+            "KES",
           timezone:
             businessForm.timezone.trim() ||
             "Africa/Nairobi",
-          updated_at: new Date().toISOString(),
+          updated_at:
+            new Date().toISOString(),
         })
         .eq("id", businessId);
 
       if (error) {
-        console.error("Business update error:", error);
+        console.error(
+          "Business update error:",
+          error
+        );
 
-        setErrorMessage(error.message);
+        setErrorMessage(
+          error.message
+        );
 
         return;
       }
 
-      /*
-       * Update the local business state so the screen
-       * immediately reflects the saved information.
-       */
       setBusiness((previous) => ({
         ...(previous || {}),
         ...businessForm,
@@ -277,8 +626,44 @@ function Settings() {
     }
   };
 
-  const handlePasswordChange = (event) => {
-    const { name, value } = event.target;
+  /*
+   * Theme change
+   */
+  const handleThemeChange = async (
+    selectedThemeId
+  ) => {
+    if (
+      selectedThemeId === themeId ||
+      changingTheme
+    ) {
+      return;
+    }
+
+    clearMessages();
+    setChangingTheme(true);
+
+    const result =
+      await changeTheme(selectedThemeId);
+
+    if (result.success) {
+      setMessage(
+        "JESTA POS theme updated successfully."
+      );
+    } else {
+      setErrorMessage(
+        result.error ||
+          "Unable to update the JESTA POS theme."
+      );
+    }
+
+    setChangingTheme(false);
+  };
+
+  const handlePasswordChange = (
+    event
+  ) => {
+    const { name, value } =
+      event.target;
 
     setPasswordForm((previous) => ({
       ...previous,
@@ -288,16 +673,22 @@ function Settings() {
     clearMessages();
   };
 
-  const handlePasswordUpdate = async (event) => {
+  const handlePasswordUpdate = async (
+    event
+  ) => {
     event.preventDefault();
 
     clearMessages();
 
-    const { newPassword, confirmPassword } =
-      passwordForm;
+    const {
+      newPassword,
+      confirmPassword,
+    } = passwordForm;
 
     if (!newPassword) {
-      setErrorMessage("Please enter a new password.");
+      setErrorMessage(
+        "Please enter a new password."
+      );
       return;
     }
 
@@ -308,7 +699,10 @@ function Settings() {
       return;
     }
 
-    if (newPassword !== confirmPassword) {
+    if (
+      newPassword !==
+      confirmPassword
+    ) {
       setErrorMessage(
         "The new password and confirmation password do not match."
       );
@@ -329,7 +723,9 @@ function Settings() {
           error
         );
 
-        setErrorMessage(error.message);
+        setErrorMessage(
+          error.message
+        );
 
         return;
       }
@@ -369,7 +765,9 @@ function Settings() {
             className="jesta-settings-loading-icon"
           />
 
-          <p>Loading business information...</p>
+          <p>
+            Loading business information...
+          </p>
         </div>
       );
     }
@@ -383,11 +781,14 @@ function Settings() {
             </div>
 
             <div>
-              <h2>Business Information</h2>
+              <h2>
+                Business Information
+              </h2>
 
               <p>
-                Manage the information used throughout
-                your JESTA POS system.
+                Manage the information used
+                throughout your JESTA POS
+                system.
               </p>
             </div>
           </div>
@@ -420,8 +821,12 @@ function Settings() {
                   id="business-name"
                   name="name"
                   type="text"
-                  value={businessForm.name}
-                  onChange={handleBusinessChange}
+                  value={
+                    businessForm.name
+                  }
+                  onChange={
+                    handleBusinessChange
+                  }
                   placeholder="Enter business name"
                   required
                 />
@@ -440,8 +845,12 @@ function Settings() {
                   id="business-type"
                   name="business_type"
                   type="text"
-                  value={businessForm.business_type}
-                  onChange={handleBusinessChange}
+                  value={
+                    businessForm.business_type
+                  }
+                  onChange={
+                    handleBusinessChange
+                  }
                   placeholder="e.g. General Retail"
                 />
               </div>
@@ -459,8 +868,12 @@ function Settings() {
                   id="business-phone"
                   name="phone"
                   type="text"
-                  value={businessForm.phone}
-                  onChange={handleBusinessChange}
+                  value={
+                    businessForm.phone
+                  }
+                  onChange={
+                    handleBusinessChange
+                  }
                   placeholder="e.g. 0700000000"
                 />
               </div>
@@ -478,8 +891,12 @@ function Settings() {
                   id="business-email"
                   name="email"
                   type="email"
-                  value={businessForm.email}
-                  onChange={handleBusinessChange}
+                  value={
+                    businessForm.email
+                  }
+                  onChange={
+                    handleBusinessChange
+                  }
                   placeholder="business@example.com"
                 />
               </div>
@@ -497,8 +914,12 @@ function Settings() {
                   id="business-address"
                   name="address"
                   type="text"
-                  value={businessForm.address}
-                  onChange={handleBusinessChange}
+                  value={
+                    businessForm.address
+                  }
+                  onChange={
+                    handleBusinessChange
+                  }
                   placeholder="Enter business address"
                 />
               </div>
@@ -516,8 +937,12 @@ function Settings() {
                   id="business-tax"
                   name="tax_number"
                   type="text"
-                  value={businessForm.tax_number}
-                  onChange={handleBusinessChange}
+                  value={
+                    businessForm.tax_number
+                  }
+                  onChange={
+                    handleBusinessChange
+                  }
                   placeholder="Optional"
                 />
               </div>
@@ -535,8 +960,12 @@ function Settings() {
                   id="business-currency"
                   name="currency"
                   type="text"
-                  value={businessForm.currency}
-                  onChange={handleBusinessChange}
+                  value={
+                    businessForm.currency
+                  }
+                  onChange={
+                    handleBusinessChange
+                  }
                   placeholder="KES"
                 />
               </div>
@@ -554,8 +983,12 @@ function Settings() {
                   id="business-timezone"
                   name="timezone"
                   type="text"
-                  value={businessForm.timezone}
-                  onChange={handleBusinessChange}
+                  value={
+                    businessForm.timezone
+                  }
+                  onChange={
+                    handleBusinessChange
+                  }
                   placeholder="Africa/Nairobi"
                 />
               </div>
@@ -599,6 +1032,9 @@ function Settings() {
     );
   };
 
+  /*
+   * Users / Employee section
+   */
   const renderUsersSection = () => {
     return (
       <div className="jesta-settings-panel">
@@ -612,13 +1048,26 @@ function Settings() {
               <h2>Users & Access</h2>
 
               <p>
-                View the account currently signed in to
-                this JESTA POS system.
+                Manage the people who can
+                access this JESTA POS
+                business.
               </p>
             </div>
           </div>
+
+          <button
+            type="button"
+            className="jesta-settings-primary-button"
+            onClick={
+              handleOpenEmployeeModal
+            }
+          >
+            <UserPlus size={17} />
+            Add Employee
+          </button>
         </div>
 
+        {/* Administrator */}
         <div className="jesta-settings-account-card">
           <div className="jesta-settings-account-avatar">
             {currentUser?.email
@@ -629,7 +1078,9 @@ function Settings() {
           </div>
 
           <div className="jesta-settings-account-details">
-            <h3>Administrator</h3>
+            <h3>
+              Administrator
+            </h3>
 
             <p>
               {currentUser?.email ||
@@ -643,9 +1094,11 @@ function Settings() {
           </div>
         </div>
 
+        {/* Business information */}
         <div className="jesta-settings-info-grid">
           <div className="jesta-settings-info-card">
             <span>Business</span>
+
             <strong>
               {business?.name ||
                 businessForm.name ||
@@ -655,33 +1108,547 @@ function Settings() {
 
           <div className="jesta-settings-info-card">
             <span>Business ID</span>
-            <strong>{businessId || "—"}</strong>
+
+            <strong>
+              {businessId || "—"}
+            </strong>
           </div>
 
           <div className="jesta-settings-info-card">
             <span>Access Level</span>
-            <strong>Administrator</strong>
+
+            <strong>
+              Administrator
+            </strong>
           </div>
 
           <div className="jesta-settings-info-card">
             <span>Account Status</span>
-            <strong>Active</strong>
+
+            <strong>
+              Active
+            </strong>
           </div>
+        </div>
+
+        {/* Employees */}
+        <div className="jesta-users-section">
+          <div className="jesta-users-toolbar">
+            <div>
+              <h3>Employees</h3>
+
+              <p>
+                Manage employee accounts
+                for this business.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="jesta-settings-secondary-button"
+              onClick={
+                loadEmployees
+              }
+              disabled={
+                loadingEmployees
+              }
+            >
+              {loadingEmployees ? (
+                <Loader2
+                  size={16}
+                  className="jesta-settings-button-spinner"
+                />
+              ) : (
+                <RefreshCw size={16} />
+              )}
+
+              Refresh
+            </button>
+          </div>
+
+          {loadingEmployees ? (
+            <div className="jesta-settings-loading jesta-users-loading">
+              <Loader2
+                size={22}
+                className="jesta-settings-loading-icon"
+              />
+
+              <p>
+                Loading employees...
+              </p>
+            </div>
+          ) : employees.length === 0 ? (
+            <div className="jesta-users-empty">
+              <div className="jesta-users-empty-icon">
+                <Users size={25} />
+              </div>
+
+              <h3>
+                No employees yet
+              </h3>
+
+              <p>
+                Add your first employee to
+                give another person access
+                to this JESTA POS business.
+              </p>
+
+              <button
+                type="button"
+                className="jesta-settings-primary-button"
+                onClick={
+                  handleOpenEmployeeModal
+                }
+              >
+                <UserPlus size={17} />
+                Add Employee
+              </button>
+            </div>
+          ) : (
+            <div className="jesta-users-table-wrap">
+              <table className="jesta-users-table">
+                <thead>
+                  <tr>
+                    <th>
+                      Employee
+                    </th>
+
+                    <th>
+                      Contact
+                    </th>
+
+                    <th>
+                      Role
+                    </th>
+
+                    <th>
+                      Status
+                    </th>
+
+                    <th>
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {employees.map(
+                    (employee) => {
+                      const isActive =
+                        employee.is_active;
+
+                      const isProcessing =
+                        employeeActionId ===
+                        employee.id;
+
+                      return (
+                        <tr
+                          key={
+                            employee.id
+                          }
+                        >
+                          <td>
+                            <div className="jesta-user-identity">
+                              <div className="jesta-user-avatar">
+                                {employee.full_name
+                                  ?.charAt(
+                                    0
+                                  )
+                                  ?.toUpperCase() ||
+                                  "E"}
+                              </div>
+
+                              <div>
+                                <strong className="jesta-user-name">
+                                  {
+                                    employee.full_name
+                                  }
+                                </strong>
+
+                                <span className="jesta-user-email">
+                                  {
+                                    employee.email
+                                  }
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td>
+                            <div className="jesta-user-contact">
+                              <span>
+                                <Mail
+                                  size={
+                                    14
+                                  }
+                                />
+
+                                {employee.email ||
+                                  "—"}
+                              </span>
+
+                              {employee.phone && (
+                                <span>
+                                  <Phone
+                                    size={
+                                      14
+                                    }
+                                  />
+
+                                  {
+                                    employee.phone
+                                  }
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td>
+                            <span className="jesta-user-role">
+                              Employee
+                            </span>
+                          </td>
+
+                          <td>
+                            <span
+                              className={`jesta-user-status ${
+                                isActive
+                                  ? "jesta-user-status-active"
+                                  : "jesta-user-status-inactive"
+                              }`}
+                            >
+                              <span></span>
+
+                              {isActive
+                                ? "Active"
+                                : "Inactive"}
+                            </span>
+                          </td>
+
+                          <td>
+                            <button
+                              type="button"
+                              className={`jesta-user-action ${
+                                isActive
+                                  ? "jesta-user-action-danger"
+                                  : "jesta-user-action-success"
+                              }`}
+                              onClick={() =>
+                                handleEmployeeStatusToggle(
+                                  employee
+                                )
+                              }
+                              disabled={
+                                isProcessing
+                              }
+                            >
+                              {isProcessing ? (
+                                <Loader2
+                                  size={
+                                    15
+                                  }
+                                  className="jesta-settings-button-spinner"
+                                />
+                              ) : isActive ? (
+                                <UserX
+                                  size={
+                                    15
+                                  }
+                                />
+                              ) : (
+                                <UserCheck
+                                  size={
+                                    15
+                                  }
+                                />
+                              )}
+
+                              {isActive
+                                ? "Deactivate"
+                                : "Reactivate"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <div className="jesta-settings-notice">
           <ShieldCheck size={18} />
 
           <div>
-            <strong>User management</strong>
+            <strong>
+              Employee access
+            </strong>
 
             <p>
-              Employee accounts, roles, and permissions
-              can be added here as JESTA's multi-user
-              management features are expanded.
+              Employees are created with
+              the Employee role and are
+              automatically linked to this
+              business. Deactivating an
+              employee preserves their
+              account and transaction
+              history while preventing
+              further access.
             </p>
           </div>
         </div>
+
+        {/* Add Employee Modal */}
+        {employeeModalOpen && (
+          <div
+            className="jesta-employee-modal-backdrop"
+            onMouseDown={(event) => {
+              if (
+                event.target ===
+                event.currentTarget
+              ) {
+                handleCloseEmployeeModal();
+              }
+            }}
+          >
+            <div
+              className="jesta-employee-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="add-employee-title"
+            >
+              <div className="jesta-employee-modal-header">
+                <div>
+                  <div className="jesta-employee-modal-icon">
+                    <UserPlus size={20} />
+                  </div>
+
+                  <div>
+                    <h2 id="add-employee-title">
+                      Add Employee
+                    </h2>
+
+                    <p>
+                      Create an employee
+                      account for this
+                      business.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="jesta-employee-modal-close"
+                  onClick={
+                    handleCloseEmployeeModal
+                  }
+                  disabled={
+                    savingEmployee
+                  }
+                  aria-label="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form
+                onSubmit={
+                  handleCreateEmployee
+                }
+              >
+                <div className="jesta-employee-modal-body">
+                  <div className="jesta-employee-modal-grid">
+                    <div className="jesta-settings-field">
+                      <label htmlFor="employee-full-name">
+                        Full Name
+                      </label>
+
+                      <div className="jesta-settings-input-wrap">
+                        <Users
+                          size={17}
+                        />
+
+                        <input
+                          id="employee-full-name"
+                          name="full_name"
+                          type="text"
+                          value={
+                            employeeForm.full_name
+                          }
+                          onChange={
+                            handleEmployeeFormChange
+                          }
+                          placeholder="e.g. John Kamau"
+                          autoComplete="name"
+                          required
+                          disabled={
+                            savingEmployee
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="jesta-settings-field">
+                      <label htmlFor="employee-email">
+                        Email Address
+                      </label>
+
+                      <div className="jesta-settings-input-wrap">
+                        <Mail
+                          size={17}
+                        />
+
+                        <input
+                          id="employee-email"
+                          name="email"
+                          type="email"
+                          value={
+                            employeeForm.email
+                          }
+                          onChange={
+                            handleEmployeeFormChange
+                          }
+                          placeholder="employee@example.com"
+                          autoComplete="email"
+                          required
+                          disabled={
+                            savingEmployee
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="jesta-settings-field">
+                      <label htmlFor="employee-phone">
+                        Phone Number
+                      </label>
+
+                      <div className="jesta-settings-input-wrap">
+                        <Phone
+                          size={17}
+                        />
+
+                        <input
+                          id="employee-phone"
+                          name="phone"
+                          type="text"
+                          value={
+                            employeeForm.phone
+                          }
+                          onChange={
+                            handleEmployeeFormChange
+                          }
+                          placeholder="e.g. 0712345678"
+                          autoComplete="tel"
+                          disabled={
+                            savingEmployee
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="jesta-settings-field">
+                      <label htmlFor="employee-password">
+                        Temporary Password
+                      </label>
+
+                      <div className="jesta-settings-input-wrap">
+                        <Lock
+                          size={17}
+                        />
+
+                        <input
+                          id="employee-password"
+                          name="password"
+                          type="password"
+                          value={
+                            employeeForm.password
+                          }
+                          onChange={
+                            handleEmployeeFormChange
+                          }
+                          placeholder="Minimum 8 characters"
+                          autoComplete="new-password"
+                          minLength={8}
+                          required
+                          disabled={
+                            savingEmployee
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="jesta-employee-modal-note">
+                    <ShieldCheck
+                      size={17}
+                    />
+
+                    <p>
+                      The employee will be
+                      created with the
+                      <strong>
+                        {" "}
+                        Employee
+                      </strong>{" "}
+                      role and linked to
+                      <strong>
+                        {" "}
+                        {business?.name ||
+                          "this business"}
+                      </strong>
+                      . Share the temporary
+                      password securely with
+                      the employee.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="jesta-employee-modal-footer">
+                  <button
+                    type="button"
+                    className="jesta-settings-secondary-button"
+                    onClick={
+                      handleCloseEmployeeModal
+                    }
+                    disabled={
+                      savingEmployee
+                    }
+                  >
+                    <X size={17} />
+                    Cancel
+                  </button>
+
+                  <button
+                    type="submit"
+                    className="jesta-settings-primary-button"
+                    disabled={
+                      savingEmployee
+                    }
+                  >
+                    {savingEmployee ? (
+                      <>
+                        <Loader2
+                          size={17}
+                          className="jesta-settings-button-spinner"
+                        />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus
+                          size={17}
+                        />
+                        Create Employee
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -699,15 +1666,18 @@ function Settings() {
               <h2>Security</h2>
 
               <p>
-                Keep your JESTA account secure by managing
-                your password.
+                Keep your JESTA account
+                secure by managing your
+                password.
               </p>
             </div>
           </div>
         </div>
 
         <form
-          onSubmit={handlePasswordUpdate}
+          onSubmit={
+            handlePasswordUpdate
+          }
           className="jesta-settings-form"
         >
           <div className="jesta-settings-security-header">
@@ -716,11 +1686,14 @@ function Settings() {
             </div>
 
             <div>
-              <h3>Change Password</h3>
+              <h3>
+                Change Password
+              </h3>
 
               <p>
-                Choose a strong password that you do not
-                use on other services.
+                Choose a strong password
+                that you do not use on other
+                services.
               </p>
             </div>
           </div>
@@ -738,8 +1711,12 @@ function Settings() {
                   id="new-password"
                   name="newPassword"
                   type="password"
-                  value={passwordForm.newPassword}
-                  onChange={handlePasswordChange}
+                  value={
+                    passwordForm.newPassword
+                  }
+                  onChange={
+                    handlePasswordChange
+                  }
                   placeholder="Enter new password"
                   autoComplete="new-password"
                   required
@@ -759,8 +1736,12 @@ function Settings() {
                   id="confirm-password"
                   name="confirmPassword"
                   type="password"
-                  value={passwordForm.confirmPassword}
-                  onChange={handlePasswordChange}
+                  value={
+                    passwordForm.confirmPassword
+                  }
+                  onChange={
+                    handlePasswordChange
+                  }
                   placeholder="Confirm new password"
                   autoComplete="new-password"
                   required
@@ -787,7 +1768,9 @@ function Settings() {
             <button
               type="submit"
               className="jesta-settings-primary-button"
-              disabled={updatingPassword}
+              disabled={
+                updatingPassword
+              }
             >
               {updatingPassword ? (
                 <>
@@ -810,6 +1793,225 @@ function Settings() {
     );
   };
 
+  /*
+   * Appearance / Theme section
+   */
+  const renderAppearanceSection = () => {
+    return (
+      <div className="jesta-settings-panel">
+        <div className="jesta-settings-panel-header">
+          <div className="jesta-settings-panel-heading">
+            <div className="jesta-settings-panel-icon">
+              <Palette size={20} />
+            </div>
+
+            <div>
+              <h2>
+                JESTA POS Appearance
+              </h2>
+
+              <p>
+                Choose the color theme used
+                throughout your business's
+                JESTA POS system.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="jesta-theme-intro">
+          <div className="jesta-theme-intro-icon">
+            <Palette size={20} />
+          </div>
+
+          <div>
+            <strong>
+              Business-wide theme
+            </strong>
+
+            <p>
+              Your selected theme is saved
+              to the business and applies
+              to the entire JESTA POS
+              system. All authorized users
+              will see the same theme.
+            </p>
+          </div>
+        </div>
+
+        <div className="jesta-theme-grid">
+          {Object.values(themes).map(
+            (themeOption) => {
+              const isSelected =
+                themeId ===
+                themeOption.id;
+
+              const colors =
+                themeOption.colors;
+
+              return (
+                <button
+                  key={themeOption.id}
+                  type="button"
+                  className={`jesta-theme-card ${
+                    isSelected
+                      ? "jesta-theme-card-selected"
+                      : ""
+                  }`}
+                  onClick={() =>
+                    handleThemeChange(
+                      themeOption.id
+                    )
+                  }
+                  disabled={
+                    changingTheme ||
+                    loadingTheme
+                  }
+                  aria-pressed={
+                    isSelected
+                  }
+                >
+                  <div
+                    className="jesta-theme-preview"
+                    style={{
+                      background:
+                        colors.background,
+                      borderColor:
+                        colors.border,
+                    }}
+                  >
+                    <div
+                      className="jesta-theme-preview-sidebar"
+                      style={{
+                        background:
+                          colors.sidebar,
+                      }}
+                    >
+                      <span
+                        style={{
+                          background:
+                            colors.sidebarActive,
+                        }}
+                      ></span>
+
+                      <span></span>
+
+                      <span></span>
+                    </div>
+
+                    <div className="jesta-theme-preview-content">
+                      <div
+                        className="jesta-theme-preview-header"
+                        style={{
+                          background:
+                            colors.surface,
+                          borderColor:
+                            colors.border,
+                        }}
+                      >
+                        <span
+                          style={{
+                            background:
+                              colors.primary,
+                          }}
+                        ></span>
+
+                        <span
+                          style={{
+                            background:
+                              colors.border,
+                          }}
+                        ></span>
+                      </div>
+
+                      <div className="jesta-theme-preview-cards">
+                        <span
+                          style={{
+                            background:
+                              colors.surface,
+                            borderColor:
+                              colors.border,
+                          }}
+                        ></span>
+
+                        <span
+                          style={{
+                            background:
+                              colors.primaryLight,
+                            borderColor:
+                              colors.border,
+                          }}
+                        ></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="jesta-theme-card-footer">
+                    <div>
+                      <strong>
+                        {themeOption.name}
+                      </strong>
+
+                      <span>
+                        {
+                          themeOption.description
+                        }
+                      </span>
+                    </div>
+
+                    {isSelected && (
+                      <div className="jesta-theme-selected-check">
+                        <Check
+                          size={16}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            }
+          )}
+        </div>
+
+        <div className="jesta-theme-current">
+          <div>
+            <span>
+              Current theme
+            </span>
+
+            <strong>
+              {loadingTheme
+                ? "Loading..."
+                : themes[themeId]?.name ||
+                  "JESTA Original"}
+            </strong>
+          </div>
+
+          <div
+            className="jesta-theme-current-dot"
+            style={{
+              background:
+                themes[themeId]?.colors
+                  ?.primary ||
+                "#2563EB",
+            }}
+          ></div>
+        </div>
+
+        {changingTheme && (
+          <div className="jesta-theme-saving">
+            <Loader2
+              size={16}
+              className="jesta-settings-button-spinner"
+            />
+
+            Applying theme...
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderSystemSection = () => {
     return (
       <div className="jesta-settings-panel">
@@ -820,11 +2022,14 @@ function Settings() {
             </div>
 
             <div>
-              <h2>System Settings</h2>
+              <h2>
+                System Settings
+              </h2>
 
               <p>
-                View the configuration currently used by
-                your JESTA POS system.
+                View the configuration
+                currently used by your JESTA
+                POS system.
               </p>
             </div>
           </div>
@@ -846,8 +2051,9 @@ function Settings() {
               </strong>
 
               <p>
-                Used when displaying sales, expenses,
-                purchases, and reports.
+                Used when displaying sales,
+                expenses, purchases, and
+                reports.
               </p>
             </div>
           </div>
@@ -867,8 +2073,8 @@ function Settings() {
               </strong>
 
               <p>
-                Used for business transaction dates and
-                times.
+                Used for business transaction
+                dates and times.
               </p>
             </div>
           </div>
@@ -879,7 +2085,9 @@ function Settings() {
             </div>
 
             <div>
-              <span>Business Type</span>
+              <span>
+                Business Type
+              </span>
 
               <strong>
                 {business?.business_type ||
@@ -888,8 +2096,8 @@ function Settings() {
               </strong>
 
               <p>
-                Defines the type of business using JESTA
-                POS.
+                Defines the type of business
+                using JESTA POS.
               </p>
             </div>
           </div>
@@ -900,12 +2108,17 @@ function Settings() {
             </div>
 
             <div>
-              <span>System Version</span>
+              <span>
+                System Version
+              </span>
 
-              <strong>JESTA POS 1.0</strong>
+              <strong>
+                JESTA POS 1.0
+              </strong>
 
               <p>
-                Current JESTA POS application version.
+                Current JESTA POS application
+                version.
               </p>
             </div>
           </div>
@@ -915,11 +2128,14 @@ function Settings() {
           <SettingsIcon size={18} />
 
           <div>
-            <strong>Configuration management</strong>
+            <strong>
+              Configuration management
+            </strong>
 
             <p>
-              Business-level configuration can be updated
-              from the Business section of Settings.
+              Business-level configuration
+              can be updated from the Business
+              section of Settings.
             </p>
           </div>
         </div>
@@ -937,6 +2153,9 @@ function Settings() {
 
       case "Security":
         return renderSecuritySection();
+
+      case "Appearance":
+        return renderAppearanceSection();
 
       case "System":
         return renderSystemSection();
@@ -959,8 +2178,9 @@ function Settings() {
           </h1>
 
           <p className="jesta-page-subtitle">
-            Manage your business, account, security, and
-            system configuration.
+            Manage your business, account,
+            security, appearance, and system
+            configuration.
           </p>
         </div>
       </div>
@@ -985,7 +2205,9 @@ function Settings() {
 
           <button
             type="button"
-            onClick={handleCloseMessage}
+            onClick={
+              handleCloseMessage
+            }
             aria-label="Close notification"
           >
             <X size={17} />
@@ -1000,45 +2222,63 @@ function Settings() {
           </div>
 
           <div className="jesta-settings-nav">
-            {settingsSections.map((section) => {
-              const Icon = section.icon;
-              const isActive =
-                activeSection === section.name;
+            {settingsSections.map(
+              (section) => {
+                const Icon =
+                  section.icon;
 
-              return (
-                <button
-                  key={section.name}
-                  type="button"
-                  onClick={() => {
-                    setActiveSection(section.name);
-                    clearMessages();
-                  }}
-                  className={`jesta-settings-nav-item ${
-                    isActive
-                      ? "jesta-settings-nav-item-active"
-                      : ""
-                  }`}
-                >
-                  <div
-                    className={`jesta-settings-nav-icon ${
+                const isActive =
+                  activeSection ===
+                  section.name;
+
+                return (
+                  <button
+                    key={
+                      section.name
+                    }
+                    type="button"
+                    onClick={() => {
+                      setActiveSection(
+                        section.name
+                      );
+
+                      clearMessages();
+                    }}
+                    className={`jesta-settings-nav-item ${
                       isActive
-                        ? "jesta-settings-nav-icon-active"
+                        ? "jesta-settings-nav-item-active"
                         : ""
                     }`}
                   >
-                    <Icon size={18} />
-                  </div>
+                    <div
+                      className={`jesta-settings-nav-icon ${
+                        isActive
+                          ? "jesta-settings-nav-icon-active"
+                          : ""
+                      }`}
+                    >
+                      <Icon
+                        size={18}
+                      />
+                    </div>
 
-                  <div className="jesta-settings-nav-text">
-                    <strong>{section.name}</strong>
+                    <div className="jesta-settings-nav-text">
+                      <strong>
+                        {
+                          section.name
+                        }
+                      </strong>
 
-                    <span>
-                      {section.description}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+                      <span>
+                        {
+                          section.description
+                        }
+                      </span>
+                    </div>
+                  </button>
+                );
+              }
+            )}
           </div>
         </aside>
 

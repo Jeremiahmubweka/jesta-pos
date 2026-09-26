@@ -21,6 +21,8 @@ function Layout({
   setActivePage,
   children,
   user,
+  userProfile,
+  userRole,
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -29,36 +31,48 @@ function Layout({
     {
       name: "Dashboard",
       icon: LayoutDashboard,
+      roles: ["admin", "employee"],
     },
     {
       name: "Sales",
       icon: ShoppingCart,
+      roles: ["admin", "employee"],
     },
     {
       name: "Inventory",
       icon: Package,
+      roles: ["admin", "employee"],
     },
     {
       name: "Purchases",
       icon: ShoppingBag,
+      roles: ["admin"],
     },
     {
       name: "Expenses",
       icon: Receipt,
+      roles: ["admin"],
     },
     {
       name: "Customers",
       icon: Users,
+      roles: ["admin", "employee"],
     },
     {
       name: "Reports",
       icon: BarChart3,
+      roles: ["admin"],
     },
     {
       name: "Settings",
       icon: Settings,
+      roles: ["admin"],
     },
   ];
+
+  const allowedNavigation = navigation.filter((item) =>
+    item.roles.includes(userRole)
+  );
 
   const handleNavigation = (page) => {
     setActivePage(page);
@@ -83,16 +97,23 @@ function Layout({
 
   const userEmail = user?.email || "Administrator";
 
-  const userInitial = userEmail
+  const userInitial = (
+    userProfile?.full_name ||
+    userEmail ||
+    "A"
+  )
     .charAt(0)
     .toUpperCase();
 
+  const displayName =
+    userProfile?.full_name ||
+    (userRole === "admin" ? "Administrator" : "Employee");
+
+  const displayRole =
+    userRole === "admin" ? "Administrator" : "Employee";
+
   return (
     <div className="min-h-screen bg-[var(--jesta-bg)]">
-      {/* =====================================================
-          MOBILE OVERLAY
-          ===================================================== */}
-
       {mobileMenuOpen && (
         <button
           type="button"
@@ -102,10 +123,6 @@ function Layout({
         />
       )}
 
-      {/* =====================================================
-          SIDEBAR
-          ===================================================== */}
-
       <aside
         className={`fixed left-0 top-0 z-50 flex h-screen w-[250px] flex-col bg-[var(--jesta-sidebar)] text-white transition-transform duration-200 ${
           mobileMenuOpen
@@ -113,15 +130,10 @@ function Layout({
             : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        {/* Brand */}
-
         <div className="flex h-[68px] items-center justify-between border-b border-white/10 px-6">
           <div>
             <div className="text-2xl font-black tracking-tight">
-              JESTA
-              <span className="text-[var(--jesta-primary)]">
-                .
-              </span>
+              JESTA<span className="text-[var(--jesta-primary)]">.</span>
             </div>
 
             <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
@@ -139,15 +151,13 @@ function Layout({
           </button>
         </div>
 
-        {/* Navigation */}
-
         <nav className="flex-1 overflow-y-auto px-3 py-5">
           <div className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
             Main Menu
           </div>
 
           <div className="space-y-1">
-            {navigation.map((item) => {
+            {allowedNavigation.map((item) => {
               const Icon = item.icon;
               const isActive = activePage === item.name;
 
@@ -155,9 +165,7 @@ function Layout({
                 <button
                   key={item.name}
                   type="button"
-                  onClick={() =>
-                    handleNavigation(item.name)
-                  }
+                  onClick={() => handleNavigation(item.name)}
                   className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-all ${
                     isActive
                       ? "bg-[var(--jesta-primary)] text-white shadow-sm"
@@ -174,20 +182,14 @@ function Layout({
                     }
                   />
 
-                  <span className="flex-1">
-                    {item.name}
-                  </span>
+                  <span className="flex-1">{item.name}</span>
 
-                  {isActive && (
-                    <ChevronRight size={15} />
-                  )}
+                  {isActive && <ChevronRight size={15} />}
                 </button>
               );
             })}
           </div>
         </nav>
-
-        {/* Sidebar Footer */}
 
         <div className="border-t border-white/10 p-4">
           <div className="rounded-lg bg-white/5 p-3">
@@ -196,7 +198,7 @@ function Layout({
             </div>
 
             <div className="mt-1 text-[11px] text-slate-400">
-              Business Management System
+              {displayRole}
             </div>
 
             <div className="mt-3 text-[10px] text-slate-500">
@@ -206,23 +208,13 @@ function Layout({
         </div>
       </aside>
 
-      {/* =====================================================
-          MAIN AREA
-          ===================================================== */}
-
       <div className="min-h-screen lg:ml-[250px]">
-        {/* Header */}
-
         <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-[var(--jesta-border)] bg-white/95 px-4 backdrop-blur sm:px-6">
-          {/* Left */}
-
           <div className="flex items-center gap-3">
             <button
               type="button"
               aria-label="Open menu"
-              onClick={() =>
-                setMobileMenuOpen(true)
-              }
+              onClick={() => setMobileMenuOpen(true)}
               className="rounded-lg border border-[var(--jesta-border)] p-2 text-[var(--jesta-text-secondary)] hover:bg-[var(--jesta-surface-soft)] lg:hidden"
             >
               <Menu size={20} />
@@ -239,24 +231,20 @@ function Layout({
             </div>
           </div>
 
-          {/* Right */}
-
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="hidden text-right sm:block">
               <div className="text-sm font-semibold text-[var(--jesta-text)]">
-                Administrator
+                {displayName}
               </div>
 
               <div className="max-w-[180px] truncate text-xs text-[var(--jesta-text-muted)]">
-                {userEmail}
+                {displayRole}
               </div>
             </div>
 
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--jesta-primary-light)] text-sm font-bold text-[var(--jesta-primary-dark)]">
               {userInitial}
             </div>
-
-            {/* Logout */}
 
             <button
               type="button"
@@ -273,8 +261,6 @@ function Layout({
             </button>
           </div>
         </header>
-
-        {/* Page Content */}
 
         <main className="min-h-[calc(100vh-68px)]">
           {children}

@@ -17,13 +17,15 @@ function Login({ onLogin }) {
 
   const handleLogin = async (event) => {
     event.preventDefault();
+
     setErrorMessage("");
     setLoading(true);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    const { data, error } =
+      await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
     if (error) {
       console.error("Login error:", error);
@@ -54,13 +56,17 @@ function Login({ onLogin }) {
             <h1>
               JESTA<span>.</span>
             </h1>
+
             <p>BUSINESS MANAGEMENT SYSTEM</p>
           </div>
         </div>
 
         <div className="login-heading">
           <h2>Welcome back</h2>
-          <p>Sign in to access your JESTA POS.</p>
+
+          <p>
+            Sign in to access your JESTA POS.
+          </p>
         </div>
 
         {errorMessage && (
@@ -72,21 +78,27 @@ function Login({ onLogin }) {
 
         <form onSubmit={handleLogin} className="login-form">
           <div className="login-field">
-            <label htmlFor="email">Email address</label>
+            <label htmlFor="email">
+              Email address
+            </label>
 
             <input
               id="email"
               type="email"
               placeholder="Enter your email"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) =>
+                setEmail(event.target.value)
+              }
               required
               autoComplete="email"
             />
           </div>
 
           <div className="login-field">
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">
+              Password
+            </label>
 
             <div className="password-input">
               <input
@@ -94,7 +106,9 @@ function Login({ onLogin }) {
                 type={showPassword ? "text" : "password"}
                 placeholder="Enter your password"
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) =>
+                  setPassword(event.target.value)
+                }
                 required
                 autoComplete="current-password"
               />
@@ -102,9 +116,13 @@ function Login({ onLogin }) {
               <button
                 type="button"
                 className="password-toggle"
-                onClick={() => setShowPassword(!showPassword)}
+                onClick={() =>
+                  setShowPassword(!showPassword)
+                }
                 aria-label={
-                  showPassword ? "Hide password" : "Show password"
+                  showPassword
+                    ? "Hide password"
+                    : "Show password"
                 }
               >
                 {showPassword ? (
@@ -137,7 +155,11 @@ function Login({ onLogin }) {
 
         <div className="login-security">
           <ShieldCheck size={16} />
-          <span>Your business data is securely protected.</span>
+
+          <span>
+            Your account access is automatically determined
+            by your JESTA user role.
+          </span>
         </div>
 
         <div className="login-footer">
