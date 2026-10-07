@@ -14,12 +14,19 @@ import Settings from "./pages/Settings";
 
 import { ThemeProvider } from "./theme/ThemeProvider";
 
+const SAVED_PAGE_KEY = "jesta_active_page";
+
 function AppContent() {
   const [session, setSession] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
-  const [activePage, setActivePage] = useState("Dashboard");
+
+  const [activePage, setActivePage] = useState(() => {
+    const savedPage = localStorage.getItem(SAVED_PAGE_KEY);
+
+    return savedPage || "Dashboard";
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -52,6 +59,7 @@ function AppContent() {
       if (!session) {
         setUserProfile(null);
         setActivePage("Dashboard");
+        localStorage.removeItem(SAVED_PAGE_KEY);
       }
     });
 
@@ -60,6 +68,12 @@ function AppContent() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (activePage) {
+      localStorage.setItem(SAVED_PAGE_KEY, activePage);
+    }
+  }, [activePage]);
 
   useEffect(() => {
     let mounted = true;
@@ -128,10 +142,10 @@ function AppContent() {
         setUserProfile(data);
 
         /*
-         * Employees always start on Dashboard.
-         * Admins also start on Dashboard.
+         * The user's last active page is now restored
+         * from localStorage instead of always starting
+         * on Dashboard.
          */
-        setActivePage("Dashboard");
 
         setProfileLoading(false);
       }
@@ -145,7 +159,10 @@ function AppContent() {
   }, [session]);
 
   const handleLogin = () => {
-    setActivePage("Dashboard");
+    const savedPage =
+      localStorage.getItem(SAVED_PAGE_KEY);
+
+    setActivePage(savedPage || "Dashboard");
   };
 
   if (loading || (session && profileLoading)) {

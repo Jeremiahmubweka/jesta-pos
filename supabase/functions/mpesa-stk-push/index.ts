@@ -92,8 +92,8 @@ Deno.serve(async (req) => {
 
     const consumerKey = Deno.env.get("MPESA_CONSUMER_KEY");
     const consumerSecret = Deno.env.get("MPESA_CONSUMER_SECRET");
-    const shortCode = Deno.env.get("MPESA_SHORTCODE");
-    const passkey = Deno.env.get("MPESA_PASSKEY");
+    const defaultShortCode = Deno.env.get("MPESA_SHORTCODE");
+    const defaultPasskey = Deno.env.get("MPESA_PASSKEY");
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get(
@@ -103,8 +103,8 @@ Deno.serve(async (req) => {
     if (
       !consumerKey ||
       !consumerSecret ||
-      !shortCode ||
-      !passkey
+      !defaultShortCode ||
+      !defaultPasskey
     ) {
       throw new Error(
         "M-Pesa configuration is incomplete. Please check the Supabase M-Pesa secrets."
@@ -121,10 +121,6 @@ Deno.serve(async (req) => {
      * ---------------------------------------------------------
      * CREATE SERVER-SIDE SUPABASE CLIENT
      * ---------------------------------------------------------
-     *
-     * The service-role client is used only inside this
-     * Edge Function. It allows the function to save the
-     * pending M-Pesa transaction securely.
      */
 
     const supabaseAdmin = createClient(
@@ -165,15 +161,11 @@ Deno.serve(async (req) => {
      */
 
     if (!businessId) {
-      throw new Error(
-        "Business ID is required."
-      );
+      throw new Error("Business ID is required.");
     }
 
     if (!saleNumber) {
-      throw new Error(
-        "Sale number is required."
-      );
+      throw new Error("Sale number is required.");
     }
 
     if (!Array.isArray(items) || items.length === 0) {
@@ -188,8 +180,124 @@ Deno.serve(async (req) => {
       !Number.isInteger(numericBusinessId) ||
       numericBusinessId <= 0
     ) {
+      throw new Error("Invalid business ID.");
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * GET THIS BUSINESS'S M-PESA SETTINGS
+     * ---------------------------------------------------------
+     *
+     * The merchant number is now taken from the business
+     * that is making this sale.
+     *
+     * This means different JESTA businesses can have
+     * different M-Pesa merchant numbers.
+     */
+
+    const {
+      data: business,
+      error: businessError,
+    } = await supabaseAdmin
+      .from("businesses")
+      .select(
+        "id, name, mpesa_enabled, mpesa_merchant_type, mpesa_merchant_number, mpesa_environment"
+      )
+      .eq("id", numericBusinessId)
+      .maybeSingle();
+
+    if (businessError) {
+      console.error(
+        "Failed to load business M-Pesa settings:",
+        businessError
+      );
+
       throw new Error(
-        "Invalid business ID."
+        "Could not load this business's M-Pesa settings."
+      );
+    }
+
+    if (!business) {
+      throw new Error(
+        "The business connected to this sale could not be found."
+      );
+    }
+
+    if (!business.mpesa_enabled) {
+      throw new Error(
+        "M-Pesa payments are not enabled for this business."
+      );
+    }
+
+    if (!business.mpesa_merchant_number) {
+      throw new Error(
+        "This business has not entered an M-Pesa merchant number in Settings."
+      );
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * CURRENT DARaja CONFIGURATION
+     * ---------------------------------------------------------
+     *
+     * For now we continue using the working sandbox Daraja
+     * credentials stored in Supabase secrets.
+     *
+     * The business-specific merchant number controls the
+     * destination of the payment.
+     */
+
+    const merchantNumber = String(
+      business.mpesa_merchant_number
+    ).trim();
+
+    const merchantType =
+      String(
+        business.mpesa_merchant_type || "paybill"
+      ).toLowerCase();
+
+    const environment =
+      String(
+        business.mpesa_environment || "sandbox"
+      ).toLowerCase();
+
+    if (environment !== "sandbox") {
+      throw new Error(
+        "Production M-Pesa has not been enabled yet. Please keep this business on Sandbox while we complete testing."
+      );
+    }
+
+    if (!/^\d+$/.test(merchantNumber)) {
+      throw new Error(
+        "The M-Pesa merchant number must contain numbers only."
+      );
+    }
+
+    if (
+      merchantType !== "paybill" &&
+      merchantType !== "till"
+    ) {
+      throw new Error(
+        "Invalid M-Pesa merchant account type."
+      );
+    }
+
+    /*
+     * IMPORTANT:
+     *
+     * The current working sandbox integration uses
+     * CustomerPayBillOnline.
+     *
+     * We are deliberately NOT changing the Daraja
+     * transaction type to Till yet. We will handle
+     * PayBill/Till production configuration separately
+     * after confirming the exact Daraja setup for each
+     * business.
+     */
+
+    if (merchantType !== "paybill") {
+      throw new Error(
+        "Till payments will be enabled after the PayBill sandbox flow is confirmed."
       );
     }
 
@@ -221,6 +329,14 @@ Deno.serve(async (req) => {
 
     /*
      * ---------------------------------------------------------
+     * USE BUSINESS MERCHANT NUMBER
+     * ---------------------------------------------------------
+     */
+
+    const shortCode = merchantNumber;
+
+    /*
+     * ---------------------------------------------------------
      * CREATE DARAJA TIMESTAMP
      * ---------------------------------------------------------
      */
@@ -234,13 +350,18 @@ Deno.serve(async (req) => {
      *
      * Password =
      *
-     * Shortcode + Passkey + Timestamp
+     * Business Shortcode + Passkey + Timestamp
      *
      * encoded using Base64.
+     *
+     * IMPORTANT:
+     *
+     * The passkey is still kept securely in Supabase.
+     * It is never stored in the React frontend.
      */
 
     const password = base64Encode(
-      `${shortCode}${passkey}${timestamp}`
+      `${shortCode}${defaultPasskey}${timestamp}`
     );
 
     /*
@@ -306,6 +427,10 @@ Deno.serve(async (req) => {
     console.log(
       "Sending M-Pesa STK Push:",
       {
+        businessId: numericBusinessId,
+        businessName: business.name,
+        merchantType,
+        merchantNumber: shortCode,
         ...stkPayload,
         Password: "[REDACTED]",
       }
@@ -363,17 +488,6 @@ Deno.serve(async (req) => {
      * ---------------------------------------------------------
      * SAVE PENDING M-PESA TRANSACTION
      * ---------------------------------------------------------
-     *
-     * IMPORTANT:
-     *
-     * We save the complete cart here.
-     *
-     * When Safaricom later calls mpesa-callback,
-     * the callback will use CheckoutRequestID to find
-     * this record.
-     *
-     * Only after successful payment will the callback
-     * complete the actual JESTA sale.
      */
 
     const {
@@ -416,10 +530,6 @@ Deno.serve(async (req) => {
         transactionError
       );
 
-      /*
-       * The customer has already received an STK request,
-       * so we make this failure very clear in the logs.
-       */
       throw new Error(
         "M-Pesa request was accepted, but JESTA could not save the pending transaction."
       );
@@ -431,6 +541,8 @@ Deno.serve(async (req) => {
         id: transaction.id,
         checkoutRequestId,
         saleNumber,
+        businessId: numericBusinessId,
+        merchantNumber: shortCode,
       }
     );
 

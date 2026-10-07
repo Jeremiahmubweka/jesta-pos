@@ -20,6 +20,7 @@ import {
   UserPlus,
   UserX,
   UserCheck,
+  CreditCard,
 } from "lucide-react";
 
 import { supabase } from "../lib/supabase";
@@ -49,6 +50,18 @@ function Settings() {
     currency: "KES",
     timezone: "Africa/Nairobi",
   });
+
+  /*
+   * M-Pesa payment settings
+   */
+  const [mpesaForm, setMpesaForm] = useState({
+    enabled: false,
+    merchant_type: "paybill",
+    merchant_number: "",
+    environment: "sandbox",
+  });
+
+  const [savingMpesa, setSavingMpesa] = useState(false);
 
   const [currentUser, setCurrentUser] =
     useState(null);
@@ -103,6 +116,12 @@ function Settings() {
       icon: Building2,
       description:
         "Manage your business information",
+    },
+    {
+      name: "Payments",
+      icon: CreditCard,
+      description:
+        "Configure M-Pesa payments",
     },
     {
       name: "Users",
@@ -238,6 +257,20 @@ function Settings() {
           data.timezone ||
           "Africa/Nairobi",
       });
+
+      setMpesaForm({
+        enabled:
+          data.mpesa_enabled ?? false,
+        merchant_type:
+          data.mpesa_merchant_type ||
+          "paybill",
+        merchant_number:
+          data.mpesa_merchant_number ||
+          "",
+        environment:
+          data.mpesa_environment ||
+          "sandbox",
+      });
     } catch (error) {
       console.error(
         "Unexpected business loading error:",
@@ -249,6 +282,120 @@ function Settings() {
       );
     } finally {
       setLoadingBusiness(false);
+    }
+  };
+
+  /*
+   * M-Pesa settings
+   */
+  const handleMpesaChange = (event) => {
+    const {
+      name,
+      value,
+      type,
+      checked,
+    } = event.target;
+
+    setMpesaForm((previous) => ({
+      ...previous,
+      [name]:
+        type === "checkbox"
+          ? checked
+          : value,
+    }));
+
+    clearMessages();
+  };
+
+  const handleSaveMpesa = async (
+    event
+  ) => {
+    event.preventDefault();
+
+    clearMessages();
+
+    if (!businessId) {
+      setErrorMessage(
+        "Business information is not available. Please refresh the page."
+      );
+
+      return;
+    }
+
+    if (
+      mpesaForm.enabled &&
+      !mpesaForm.merchant_number.trim()
+    ) {
+      setErrorMessage(
+        `Please enter your ${
+          mpesaForm.merchant_type ===
+          "till"
+            ? "Till Number"
+            : "PayBill Number"
+        }.`
+      );
+
+      return;
+    }
+
+    setSavingMpesa(true);
+
+    try {
+      const { error } = await supabase
+        .from("businesses")
+        .update({
+          mpesa_enabled:
+            mpesaForm.enabled,
+          mpesa_merchant_type:
+            mpesaForm.merchant_type,
+          mpesa_merchant_number:
+            mpesaForm.merchant_number.trim() ||
+            null,
+          mpesa_environment:
+            mpesaForm.environment,
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq("id", businessId);
+
+      if (error) {
+        console.error(
+          "M-Pesa settings update error:",
+          error
+        );
+
+        setErrorMessage(error.message);
+
+        return;
+      }
+
+      setBusiness((previous) => ({
+        ...(previous || {}),
+        mpesa_enabled:
+          mpesaForm.enabled,
+        mpesa_merchant_type:
+          mpesaForm.merchant_type,
+        mpesa_merchant_number:
+          mpesaForm.merchant_number.trim() ||
+          null,
+        mpesa_environment:
+          mpesaForm.environment,
+      }));
+
+      setMessage(
+        "M-Pesa payment settings updated successfully."
+      );
+    } catch (error) {
+      console.error(
+        "Unexpected M-Pesa settings error:",
+        error
+      );
+
+      setErrorMessage(
+        "Something went wrong while saving your M-Pesa settings."
+      );
+    } finally {
+      setSavingMpesa(false);
     }
   };
 
@@ -392,7 +539,9 @@ function Settings() {
               full_name:
                 full_name.trim(),
               email:
-                email.trim().toLowerCase(),
+                email
+                  .trim()
+                  .toLowerCase(),
               phone:
                 phone.trim() || null,
               password,
@@ -523,7 +672,9 @@ function Settings() {
     }
   };
 
-  const handleBusinessChange = (event) => {
+  const handleBusinessChange = (
+    event
+  ) => {
     const { name, value } =
       event.target;
 
@@ -564,7 +715,8 @@ function Settings() {
       const { error } = await supabase
         .from("businesses")
         .update({
-          name: businessForm.name.trim(),
+          name:
+            businessForm.name.trim(),
           business_type:
             businessForm.business_type.trim() ||
             null,
@@ -1033,6 +1185,262 @@ function Settings() {
   };
 
   /*
+   * Payments / M-Pesa section
+   */
+  const renderPaymentsSection = () => {
+    const merchantLabel =
+      mpesaForm.merchant_type ===
+      "till"
+        ? "Till Number"
+        : "PayBill Number";
+
+    return (
+      <div className="jesta-settings-panel">
+        <div className="jesta-settings-panel-header">
+          <div className="jesta-settings-panel-heading">
+            <div className="jesta-settings-panel-icon">
+              <CreditCard size={20} />
+            </div>
+
+            <div>
+              <h2>
+                M-Pesa Payments
+              </h2>
+
+              <p>
+                Configure the M-Pesa account
+                that this business will use
+                to receive customer payments.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="jesta-settings-close"
+            onClick={loadBusiness}
+            title="Refresh M-Pesa settings"
+            aria-label="Refresh M-Pesa settings"
+          >
+            <RefreshCw size={17} />
+          </button>
+        </div>
+
+        <form
+          onSubmit={handleSaveMpesa}
+          className="jesta-settings-form"
+        >
+          <div className="jesta-settings-form-grid">
+
+            <div className="jesta-settings-field jesta-settings-field-full">
+              <label htmlFor="mpesa-enabled">
+                M-Pesa Payments
+              </label>
+
+              <div
+                className="jesta-settings-input-wrap"
+                style={{
+                  padding:
+                    "14px 16px",
+                  minHeight: "50px",
+                }}
+              >
+                <input
+                  id="mpesa-enabled"
+                  name="enabled"
+                  type="checkbox"
+                  checked={
+                    mpesaForm.enabled
+                  }
+                  onChange={
+                    handleMpesaChange
+                  }
+                  disabled={savingMpesa}
+                  style={{
+                    width: "18px",
+                    height: "18px",
+                    flexShrink: 0,
+                    cursor: "pointer",
+                  }}
+                />
+
+                <span
+                  style={{
+                    fontWeight: 600,
+                  }}
+                >
+                  Enable M-Pesa payments
+                </span>
+              </div>
+            </div>
+
+            <div className="jesta-settings-field">
+              <label htmlFor="mpesa-merchant-type">
+                M-Pesa Account Type
+              </label>
+
+              <div className="jesta-settings-input-wrap">
+                <CreditCard size={17} />
+
+                <select
+                  id="mpesa-merchant-type"
+                  name="merchant_type"
+                  value={
+                    mpesaForm.merchant_type
+                  }
+                  onChange={
+                    handleMpesaChange
+                  }
+                  disabled={savingMpesa}
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    outline: "none",
+                    background:
+                      "transparent",
+                    font: "inherit",
+                  }}
+                >
+                  <option value="paybill">
+                    PayBill
+                  </option>
+
+                  <option value="till">
+                    Till Number
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div className="jesta-settings-field">
+              <label htmlFor="mpesa-merchant-number">
+                {merchantLabel}
+              </label>
+
+              <div className="jesta-settings-input-wrap">
+                <Phone size={17} />
+
+                <input
+                  id="mpesa-merchant-number"
+                  name="merchant_number"
+                  type="text"
+                  value={
+                    mpesaForm.merchant_number
+                  }
+                  onChange={
+                    handleMpesaChange
+                  }
+                  placeholder={
+                    mpesaForm.merchant_type ===
+                    "till"
+                      ? "e.g. 5123456"
+                      : "e.g. 123456"
+                  }
+                  disabled={savingMpesa}
+                  inputMode="numeric"
+                />
+              </div>
+            </div>
+
+            <div className="jesta-settings-field">
+              <label htmlFor="mpesa-environment">
+                Environment
+              </label>
+
+              <div className="jesta-settings-input-wrap">
+                <Globe size={17} />
+
+                <select
+                  id="mpesa-environment"
+                  name="environment"
+                  value={
+                    mpesaForm.environment
+                  }
+                  onChange={
+                    handleMpesaChange
+                  }
+                  disabled={savingMpesa}
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    outline: "none",
+                    background:
+                      "transparent",
+                    font: "inherit",
+                  }}
+                >
+                  <option value="sandbox">
+                    Sandbox
+                  </option>
+
+                  <option value="production">
+                    Production
+                  </option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="jesta-settings-notice">
+            <ShieldCheck size={18} />
+
+            <div>
+              <strong>
+                M-Pesa security
+              </strong>
+
+              <p>
+                Your Daraja Consumer Key,
+                Consumer Secret, Passkey,
+                Security Credential, and
+                other API credentials are
+                never entered or stored in
+                this screen. These sensitive
+                credentials remain securely
+                on the JESTA server-side
+                Edge Functions.
+              </p>
+            </div>
+          </div>
+
+          <div className="jesta-settings-form-footer">
+            <button
+              type="button"
+              className="jesta-settings-secondary-button"
+              onClick={loadBusiness}
+              disabled={savingMpesa}
+            >
+              <X size={17} />
+              Reset
+            </button>
+
+            <button
+              type="submit"
+              className="jesta-settings-primary-button"
+              disabled={savingMpesa}
+            >
+              {savingMpesa ? (
+                <>
+                  <Loader2
+                    size={17}
+                    className="jesta-settings-button-spinner"
+                  />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save size={17} />
+                  Save M-Pesa Settings
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  };
+
+  /*
    * Users / Employee section
    */
   const renderUsersSection = () => {
@@ -1067,7 +1475,6 @@ function Settings() {
           </button>
         </div>
 
-        {/* Administrator */}
         <div className="jesta-settings-account-card">
           <div className="jesta-settings-account-avatar">
             {currentUser?.email
@@ -1094,7 +1501,6 @@ function Settings() {
           </div>
         </div>
 
-        {/* Business information */}
         <div className="jesta-settings-info-grid">
           <div className="jesta-settings-info-card">
             <span>Business</span>
@@ -1131,7 +1537,6 @@ function Settings() {
           </div>
         </div>
 
-        {/* Employees */}
         <div className="jesta-users-section">
           <div className="jesta-users-toolbar">
             <div>
@@ -1399,7 +1804,6 @@ function Settings() {
           </div>
         </div>
 
-        {/* Add Employee Modal */}
         {employeeModalOpen && (
           <div
             className="jesta-employee-modal-backdrop"
@@ -2147,6 +2551,9 @@ function Settings() {
     switch (activeSection) {
       case "Business":
         return renderBusinessSection();
+
+      case "Payments":
+        return renderPaymentsSection();
 
       case "Users":
         return renderUsersSection();
