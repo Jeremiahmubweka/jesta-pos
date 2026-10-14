@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
@@ -14,6 +15,9 @@ import {
   RefreshCw,
   ScanBarcode,
   Camera,
+  PauseCircle,
+  RotateCcw,
+  Clock,
 } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { supabase } from "../lib/supabase";
@@ -22,6 +26,8 @@ import Receipt from "../components/Receipt";
 function Sales() {
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [parkedSales, setParkedSales] = useState([]);
+  const [loadingParkedSales, setLoadingParkedSales] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [barcodeInput, setBarcodeInput] = useState("");
@@ -61,6 +67,9 @@ function Sales() {
     })}`;
   };
 
+  /*
+   * LOAD PRODUCTS AND CUSTOMERS
+   */
   const loadSalesData = async () => {
     try {
       setLoading(true);
@@ -101,16 +110,71 @@ function Sales() {
     }
   };
 
+  /*
+   * GET THE CURRENT USER'S BUSINESS
+   */
+  const getBusinessId = async () => {
+    const {
+      data: businessId,
+      error: businessError,
+    } = await supabase.rpc("get_my_business_id");
+
+    if (businessError) {
+      throw businessError;
+    }
+
+    if (!businessId) {
+      throw new Error(
+        "No business is associated with the current user."
+      );
+    }
+
+    return businessId;
+  };
+
+  /*
+   * LOAD PARKED SALES
+   */
+  const loadParkedSales = async () => {
+    try {
+      setLoadingParkedSales(true);
+
+      const businessId = await getBusinessId();
+
+      const { data, error } = await supabase
+        .from("parked_sales")
+        .select("*")
+        .eq("business_id", businessId)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      setParkedSales(data || []);
+    } catch (error) {
+      console.error("Error loading parked sales:", error);
+      setErrorMessage(
+        error.message || "Failed to load parked sales."
+      );
+    } finally {
+      setLoadingParkedSales(false);
+    }
+  };
+
   useEffect(() => {
     loadSalesData();
+    loadParkedSales();
 
-    setTimeout(() => {
+    const focusTimer = setTimeout(() => {
       barcodeInputRef.current?.focus();
     }, 300);
+
+    return () => clearTimeout(focusTimer);
   }, []);
 
   /*
-   * Stop the camera scanner completely.
+   * STOP THE CAMERA SCANNER COMPLETELY
    */
   const stopCameraScanner = () => {
     try {
@@ -134,7 +198,7 @@ function Sales() {
   };
 
   /*
-   * Close the camera scanner modal.
+   * CLOSE THE CAMERA SCANNER MODAL
    */
   const closeCameraScanner = () => {
     stopCameraScanner();
@@ -147,7 +211,7 @@ function Sales() {
   };
 
   /*
-   * Start the camera when the scanner modal opens.
+   * START THE CAMERA WHEN THE SCANNER MODAL OPENS
    */
   useEffect(() => {
     if (!cameraScannerOpen) {
@@ -161,10 +225,6 @@ function Sales() {
         setCameraLoading(true);
         setCameraError("");
         cameraProcessingRef.current = false;
-
-        if (!cameraVideoRef.current) {
-          throw new Error("Camera preview is not ready.");
-        }
 
         await new Promise((resolve) => {
           setTimeout(resolve, 150);
@@ -212,7 +272,7 @@ function Sales() {
                 cameraProcessingRef.current = true;
 
                 try {
-                  controls.stop();
+                  cameraControlsRef.current?.stop();
                 } catch (stopError) {
                   console.warn(
                     "Camera stop warning:",
@@ -254,9 +314,7 @@ function Sales() {
 
         if (
           error?.name === "NotAllowedError" ||
-          error?.message
-            ?.toLowerCase()
-            .includes("permission")
+          error?.message?.toLowerCase().includes("permission")
         ) {
           message =
             "Camera permission was denied. Please allow camera access in your browser settings and try again.";
@@ -266,9 +324,7 @@ function Sales() {
         ) {
           message =
             "No camera was found on this device. Please use the barcode input instead.";
-        } else if (
-          error?.name === "NotReadableError"
-        ) {
+        } else if (error?.name === "NotReadableError") {
           message =
             "The camera is currently being used by another application. Close other camera apps and try again.";
         } else if (
@@ -277,7 +333,7 @@ function Sales() {
           window.location.hostname !== "127.0.0.1"
         ) {
           message =
-            "Camera access requires a secure HTTPS connection on this device. Please open the live JESTA POS website using HTTPS.";
+            "Camera access requires a secure HTTPS connection. Please open the live JESTA POS website using HTTPS.";
         }
 
         setCameraError(message);
@@ -290,9 +346,7 @@ function Sales() {
       cancelled = true;
 
       try {
-        if (cameraControlsRef.current) {
-          cameraControlsRef.current.stop();
-        }
+        cameraControlsRef.current?.stop();
       } catch (error) {
         console.warn("Camera cleanup warning:", error);
       }
@@ -309,7 +363,7 @@ function Sales() {
   }, [cameraScannerOpen]);
 
   /*
-   * Add a scanned barcode to the cart.
+   * ADD A SCANNED BARCODE TO THE CART
    */
   const lookupBarcodeAndAddToCart = async (barcodeValue) => {
     const barcode = String(barcodeValue || "").trim();
@@ -350,7 +404,6 @@ function Sales() {
       );
     } finally {
       setScanningBarcode(false);
-
       cameraProcessingRef.current = false;
 
       setTimeout(() => {
@@ -359,6 +412,9 @@ function Sales() {
     }
   };
 
+  /*
+   * FILTER PRODUCTS
+   */
   const filteredProducts = useMemo(() => {
     const search = searchTerm.trim().toLowerCase();
 
@@ -379,6 +435,9 @@ function Sales() {
     });
   }, [products, searchTerm]);
 
+  /*
+   * CALCULATE TOTALS
+   */
   const subtotal = useMemo(() => {
     return cart.reduce(
       (totalAmount, item) =>
@@ -392,63 +451,46 @@ function Sales() {
   const tax = 0;
   const discount = 0;
 
-  const total = Math.max(
-    subtotal + tax - discount,
-    0
-  );
+  const total = Math.max(subtotal + tax - discount, 0);
 
   const paid = Number(amountPaid) || 0;
 
-  const change = Math.max(
-    paid - total,
-    0
-  );
+  const change = Math.max(paid - total, 0);
+  const balance = Math.max(total - paid, 0);
 
-  const balance = Math.max(
-    total - paid,
-    0
-  );
-
+  /*
+   * ADD PRODUCT TO CART
+   */
   const addToCart = (product) => {
     setErrorMessage("");
     setSuccessMessage("");
 
-    const stock = Number(
-      product.stock_quantity || 0
-    );
+    const stock = Number(product.stock_quantity || 0);
 
     if (stock <= 0) {
-      setErrorMessage(
-        `${product.name} is out of stock.`
-      );
+      setErrorMessage(`${product.name} is out of stock.`);
       return;
     }
 
     setCart((currentCart) => {
-      const existingItem =
-        currentCart.find(
-          (item) => item.id === product.id
-        );
+      const existingItem = currentCart.find(
+        (item) => String(item.id) === String(product.id)
+      );
 
       if (existingItem) {
-        if (
-          existingItem.quantity >= stock
-        ) {
+        if (Number(existingItem.quantity) >= stock) {
           setErrorMessage(
-            `Only ${stock} unit${
-              stock === 1 ? "" : "s"
-            } of ${product.name} available.`
+            `Only ${stock} unit${stock === 1 ? "" : "s"} of ${product.name} available.`
           );
 
           return currentCart;
         }
 
         return currentCart.map((item) =>
-          item.id === product.id
+          String(item.id) === String(product.id)
             ? {
                 ...item,
-                quantity:
-                  item.quantity + 1,
+                quantity: Number(item.quantity) + 1,
               }
             : item
         );
@@ -476,23 +518,22 @@ function Sales() {
     await lookupBarcodeAndAddToCart(barcode);
   };
 
-  const updateQuantity = (
-    productId,
-    changeAmount
-  ) => {
+  /*
+   * UPDATE PRODUCT QUANTITY
+   */
+  const updateQuantity = (productId, changeAmount) => {
+    setErrorMessage("");
+
     setCart((currentCart) =>
       currentCart
         .map((item) => {
-          if (item.id !== productId) {
+          if (String(item.id) !== String(productId)) {
             return item;
           }
 
-          const stock = Number(
-            item.stock_quantity || 0
-          );
-
+          const stock = Number(item.stock_quantity || 0);
           const newQuantity =
-            item.quantity + changeAmount;
+            Number(item.quantity) + changeAmount;
 
           if (newQuantity <= 0) {
             return null;
@@ -500,9 +541,7 @@ function Sales() {
 
           if (newQuantity > stock) {
             setErrorMessage(
-              `Only ${stock} unit${
-                stock === 1 ? "" : "s"
-              } of ${item.name} available.`
+              `Only ${stock} unit${stock === 1 ? "" : "s"} of ${item.name} available.`
             );
 
             return item;
@@ -517,15 +556,21 @@ function Sales() {
     );
   };
 
+  /*
+   * REMOVE PRODUCT FROM CART
+   */
   const removeFromCart = (productId) => {
     setCart((currentCart) =>
       currentCart.filter(
-        (item) => item.id !== productId
+        (item) => String(item.id) !== String(productId)
       )
     );
   };
 
-  const clearCart = () => {
+  /*
+   * RESET THE CURRENT SALE
+   */
+  const resetCurrentSale = () => {
     setCart([]);
     setAmountPaid("");
     setSelectedCustomer("");
@@ -541,46 +586,261 @@ function Sales() {
   };
 
   /*
+   * CLEAR THE CURRENT CART
+   */
+  const clearCart = () => {
+    if (
+      cart.length > 0 &&
+      !window.confirm("Clear the current cart?")
+    ) {
+      return;
+    }
+
+    resetCurrentSale();
+  };
+
+  /*
    * ---------------------------------------------------------
-   * GET THE CURRENT USER'S BUSINESS
+   * PARK THE CURRENT SALE
+   * ---------------------------------------------------------
+   *
+   * Parking stores an unfinished order.
+   * It does NOT complete a sale, deduct stock, or initiate
+   * an M-Pesa payment.
+   */
+  const parkCurrentSale = async () => {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (cart.length === 0) {
+      setErrorMessage("Add products before parking a sale.");
+      return;
+    }
+
+    try {
+      setProcessingSale(true);
+
+      const businessId = await getBusinessId();
+
+      const customerName =
+        customers.find(
+          (customer) =>
+            String(customer.id) === String(selectedCustomer)
+        )?.name || "Walk-in Customer";
+
+      const parkedItems = cart.map((item) => ({
+        ...item,
+        quantity: Number(item.quantity),
+      }));
+
+      const { data, error } = await supabase
+        .from("parked_sales")
+        .insert({
+          business_id: businessId,
+          sale_number: `PARKED-${Date.now()}`,
+          customer_id: selectedCustomer
+            ? Number(selectedCustomer)
+            : null,
+          customer_name: customerName,
+          items: parkedItems,
+          subtotal,
+          tax_amount: tax,
+          discount_amount: discount,
+          total_amount: total,
+          payment_method: paymentMethod,
+          transaction_reference:
+            transactionReference.trim() || null,
+          mpesa_phone_number:
+            mpesaPhoneNumber.trim() || null,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      setParkedSales((current) => [data, ...current]);
+
+      resetCurrentSale();
+
+      setSuccessMessage(
+        `Sale parked successfully for ${customerName}.`
+      );
+    } catch (error) {
+      console.error("Error parking sale:", error);
+
+      setErrorMessage(
+        error.message || "Failed to park this sale."
+      );
+    } finally {
+      setProcessingSale(false);
+    }
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * RESUME A PARKED SALE
    * ---------------------------------------------------------
    */
-  const getBusinessId = async () => {
-    const {
-      data: businessId,
-      error: businessError,
-    } = await supabase.rpc(
-      "get_my_business_id"
-    );
-
-    if (businessError) {
-      throw businessError;
+  const resumeParkedSale = async (parkedSale) => {
+    if (processingSale) {
+      return;
     }
 
-    if (!businessId) {
-      throw new Error(
-        "No business is associated with the current user."
+    if (
+      cart.length > 0 &&
+      !window.confirm(
+        "Your current cart contains products. Resuming this parked sale will replace the current cart. Continue?"
+      )
+    ) {
+      return;
+    }
+
+    const savedItems = Array.isArray(parkedSale.items)
+      ? parkedSale.items
+      : [];
+
+    if (savedItems.length === 0) {
+      setErrorMessage(
+        "This parked sale has no saved products and cannot be resumed."
+      );
+      return;
+    }
+
+    try {
+      setProcessingSale(true);
+      setErrorMessage("");
+      setSuccessMessage("");
+
+      /*
+       * Restore the saved cart and payment details.
+       */
+      setCart(
+        savedItems.map((item) => ({
+          ...item,
+          quantity: Number(item.quantity || 0),
+        }))
+      );
+
+      setSelectedCustomer(
+        parkedSale.customer_id
+          ? String(parkedSale.customer_id)
+          : ""
+      );
+
+      setPaymentMethod(parkedSale.payment_method || "cash");
+
+      setTransactionReference(
+        parkedSale.transaction_reference || ""
+      );
+
+      setMpesaPhoneNumber(
+        parkedSale.mpesa_phone_number || ""
+      );
+
+      setAmountPaid("");
+
+      /*
+       * Delete the parked copy after restoring its data.
+       */
+      const { error } = await supabase
+        .from("parked_sales")
+        .delete()
+        .eq("id", parkedSale.id)
+        .eq("business_id", parkedSale.business_id);
+
+      if (error) {
+        console.error(
+          "Could not remove resumed parked sale:",
+          error
+        );
+
+        await loadParkedSales();
+
+        setSuccessMessage(
+          "Sale restored. The parked copy could not be removed. Refresh Held Sales and check for a duplicate before resuming it again."
+        );
+
+        return;
+      }
+
+      setParkedSales((current) =>
+        current.filter(
+          (sale) => String(sale.id) !== String(parkedSale.id)
+        )
+      );
+
+      setSuccessMessage(
+        `Sale for ${parkedSale.customer_name || "Walk-in Customer"} resumed. Confirm stock and payment details before completing it.`
+      );
+
+      setTimeout(() => {
+        barcodeInputRef.current?.focus();
+      }, 100);
+    } catch (error) {
+      console.error("Error resuming parked sale:", error);
+
+      setErrorMessage(
+        error.message || "Failed to resume parked sale."
+      );
+    } finally {
+      setProcessingSale(false);
+    }
+  };
+
+  /*
+   * DELETE A PARKED SALE
+   */
+  const deleteParkedSale = async (parkedSale) => {
+    if (processingSale) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Permanently delete the parked sale for ${parkedSale.customer_name || "Walk-in Customer"}?`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setErrorMessage("");
+      setSuccessMessage("");
+
+      const { error } = await supabase
+        .from("parked_sales")
+        .delete()
+        .eq("id", parkedSale.id)
+        .eq("business_id", parkedSale.business_id);
+
+      if (error) {
+        throw error;
+      }
+
+      setParkedSales((current) =>
+        current.filter(
+          (sale) => String(sale.id) !== String(parkedSale.id)
+        )
+      );
+
+      setSuccessMessage("Parked sale deleted.");
+    } catch (error) {
+      console.error("Error deleting parked sale:", error);
+
+      setErrorMessage(
+        error.message || "Failed to delete parked sale."
       );
     }
-
-    return businessId;
   };
 
   /*
    * ---------------------------------------------------------
    * WAIT FOR M-PESA CALLBACK
    * ---------------------------------------------------------
-   *
-   * Safaricom sends the payment result to our
-   * mpesa-callback Edge Function.
-   *
-   * The callback updates mpesa_transactions.
-   *
-   * We check that table every 2 seconds.
    */
-  const waitForMpesaPayment = async (
-    checkoutRequestId
-  ) => {
+  const waitForMpesaPayment = async (checkoutRequestId) => {
     const maxAttempts = 60;
 
     for (
@@ -588,16 +848,10 @@ function Sales() {
       attempt <= maxAttempts;
       attempt += 1
     ) {
-      const {
-        data: transaction,
-        error,
-      } = await supabase
+      const { data: transaction, error } = await supabase
         .from("mpesa_transactions")
         .select("*")
-        .eq(
-          "checkout_request_id",
-          checkoutRequestId
-        )
+        .eq("checkout_request_id", checkoutRequestId)
         .maybeSingle();
 
       if (error) {
@@ -605,41 +859,31 @@ function Sales() {
       }
 
       if (transaction) {
-        if (
-          transaction.status === "SUCCESS"
-        ) {
+        if (transaction.status === "SUCCESS") {
           return transaction;
         }
 
-        if (
-          transaction.status === "FAILED"
-        ) {
+        if (transaction.status === "FAILED") {
           throw new Error(
             transaction.result_description ||
               "The M-Pesa payment was not completed."
           );
         }
 
-        if (
-          transaction.status ===
-          "PROCESSING_ERROR"
-        ) {
+        if (transaction.status === "PROCESSING_ERROR") {
           throw new Error(
             "The M-Pesa payment was received, but JESTA could not complete the sale. Please contact the administrator before attempting the payment again."
           );
         }
       }
 
-      /*
-       * Wait 2 seconds before checking again.
-       */
       await new Promise((resolve) => {
         setTimeout(resolve, 2000);
       });
     }
 
     throw new Error(
-      "The M-Pesa payment is still pending. Please check the customer's phone before trying the payment again."
+      "The M-Pesa payment is still pending. Please check the customer's phone and transaction status before trying again."
     );
   };
 
@@ -662,19 +906,12 @@ function Sales() {
       );
     }
 
-    /*
-     * Send STK Push.
-     */
     setSuccessMessage(
       "Sending M-Pesa payment request to the customer's phone..."
     );
 
-    const {
-      data: mpesaResponse,
-      error: mpesaError,
-    } = await supabase.functions.invoke(
-      "mpesa-stk-push",
-      {
+    const { data: mpesaResponse, error: mpesaError } =
+      await supabase.functions.invoke("mpesa-stk-push", {
         body: {
           phoneNumber: phone,
           amount: total,
@@ -688,14 +925,10 @@ function Sales() {
           discountAmount: discount,
           notes: null,
         },
-      }
-    );
+      });
 
     if (mpesaError) {
-      console.error(
-        "M-Pesa Edge Function error:",
-        mpesaError
-      );
+      console.error("M-Pesa Edge Function error:", mpesaError);
 
       throw new Error(
         mpesaError.message ||
@@ -703,10 +936,7 @@ function Sales() {
       );
     }
 
-    if (
-      !mpesaResponse ||
-      !mpesaResponse.success
-    ) {
+    if (!mpesaResponse || !mpesaResponse.success) {
       throw new Error(
         mpesaResponse?.error ||
           "M-Pesa payment request could not be started."
@@ -714,10 +944,8 @@ function Sales() {
     }
 
     const checkoutRequestId =
-      mpesaResponse?.transaction
-        ?.checkoutRequestId ||
-      mpesaResponse?.data
-        ?.CheckoutRequestID;
+      mpesaResponse?.transaction?.checkoutRequestId ||
+      mpesaResponse?.data?.CheckoutRequestID;
 
     if (!checkoutRequestId) {
       throw new Error(
@@ -725,71 +953,40 @@ function Sales() {
       );
     }
 
-    /*
-     * Tell the cashier that the customer should now
-     * check their phone.
-     */
     setSuccessMessage(
       `M-Pesa prompt sent to ${phone}. Please ask the customer to enter their M-Pesa PIN.`
     );
 
-    /*
-     * Wait for Safaricom's callback.
-     */
     const transaction =
-      await waitForMpesaPayment(
-        checkoutRequestId
-      );
+      await waitForMpesaPayment(checkoutRequestId);
 
     /*
-     * Payment succeeded.
-     *
-     * The callback has already called complete_sale(),
-     * so the sale, inventory and payment are now
-     * recorded in the database.
+     * The callback completes the sale after successful payment.
      */
-
     const receiptSale = {
       id: transaction.sale_id,
-      sale_number:
-        transaction.sale_number ||
-        saleNumber,
-      created_at:
-        new Date().toISOString(),
+      sale_number: transaction.sale_number || saleNumber,
+      created_at: new Date().toISOString(),
       customer_name: customerName,
       subtotal,
-      tax_amount:
-        Number(
-          transaction.tax_amount || tax
-        ),
-      discount_amount:
-        Number(
-          transaction.discount_amount ||
-            discount
-        ),
-      total_amount:
-        Number(transaction.amount || total),
-      amount_paid:
-        Number(transaction.amount || total),
+      tax_amount: Number(transaction.tax_amount || tax),
+      discount_amount: Number(
+        transaction.discount_amount || discount
+      ),
+      total_amount: Number(transaction.amount || total),
+      amount_paid: Number(transaction.amount || total),
       change_amount: 0,
       balance_amount: 0,
       payment_method: "mpesa",
       transaction_reference:
-        transaction.mpesa_receipt_number ||
-        null,
+        transaction.mpesa_receipt_number || null,
       items: cart.map((item) => ({
         ...item,
         line_total:
-          Number(
-            item.selling_price || 0
-          ) *
+          Number(item.selling_price || 0) *
           Number(item.quantity || 0),
       })),
     };
-
-    setAmountPaid(
-      Number(transaction.amount || total)
-    );
 
     setCompletedSale(receiptSale);
 
@@ -797,10 +994,6 @@ function Sales() {
       `M-Pesa payment received successfully. Sale ${saleNumber} completed.`
     );
 
-    /*
-     * Clear the cart only AFTER successful payment
-     * and successful sale completion.
-     */
     setCart([]);
     setAmountPaid("");
     setSelectedCustomer("");
@@ -832,26 +1025,11 @@ function Sales() {
     }
 
     if (total <= 0) {
-      setErrorMessage(
-        "Sale total must be greater than zero."
-      );
+      setErrorMessage("Sale total must be greater than zero.");
       return;
     }
 
-    /*
-     * Cash and card require payment BEFORE
-     * complete_sale() is called.
-     *
-     * M-Pesa is different:
-     *
-     * We send the STK Push first and only
-     * complete the sale after Safaricom confirms
-     * successful payment.
-     */
-    if (
-      paymentMethod !== "mpesa" &&
-      paid < total
-    ) {
+    if (paymentMethod !== "mpesa" && paid < total) {
       setErrorMessage(
         `Insufficient payment. Customer still owes ${formatCurrency(
           total - paid
@@ -863,33 +1041,22 @@ function Sales() {
     try {
       setProcessingSale(true);
 
-      const businessId =
-        await getBusinessId();
+      const businessId = await getBusinessId();
+      const saleNumber = `SALE-${Date.now()}`;
 
-      const saleNumber =
-        `SALE-${Date.now()}`;
-
-      const saleItems = cart.map(
-        (item) => ({
-          product_id: item.id,
-          quantity: Number(
-            item.quantity
-          ),
-        })
-      );
+      const saleItems = cart.map((item) => ({
+        product_id: item.id,
+        quantity: Number(item.quantity),
+      }));
 
       const customerName =
         customers.find(
           (customer) =>
-            String(customer.id) ===
-            String(selectedCustomer)
-        )?.name ||
-        "Walk-in Customer";
+            String(customer.id) === String(selectedCustomer)
+        )?.name || "Walk-in Customer";
 
       /*
-       * -------------------------------------------------------
        * M-PESA
-       * -------------------------------------------------------
        */
       if (paymentMethod === "mpesa") {
         await handleMpesaPayment({
@@ -903,110 +1070,58 @@ function Sales() {
       }
 
       /*
-       * -------------------------------------------------------
        * CASH / CARD
-       * -------------------------------------------------------
-       *
-       * These continue using the existing
-       * complete_sale RPC.
        */
-      const {
-        data: saleResult,
-        error: saleError,
-      } = await supabase.rpc(
-        "complete_sale",
-        {
-          p_business_id:
-            businessId,
-
-          p_customer_id:
-            selectedCustomer
-              ? Number(selectedCustomer)
-              : null,
-
-          p_sale_number:
-            saleNumber,
-
-          p_items:
-            saleItems,
-
-          p_amount_paid:
-            paid,
-
-          p_payment_method:
-            paymentMethod,
-
+      const { data: saleResult, error: saleError } =
+        await supabase.rpc("complete_sale", {
+          p_business_id: businessId,
+          p_customer_id: selectedCustomer
+            ? Number(selectedCustomer)
+            : null,
+          p_sale_number: saleNumber,
+          p_items: saleItems,
+          p_amount_paid: paid,
+          p_payment_method: paymentMethod,
           p_transaction_reference:
-            transactionReference.trim() ||
-            null,
-
-          p_tax_amount:
-            tax,
-
-          p_discount_amount:
-            discount,
-
-          p_notes:
-            null,
-        }
-      );
+            transactionReference.trim() || null,
+          p_tax_amount: tax,
+          p_discount_amount: discount,
+          p_notes: null,
+        });
 
       if (saleError) {
         throw saleError;
       }
 
       const saleId =
-        typeof saleResult === "object" &&
-        saleResult !== null
-          ? saleResult.id ||
-            saleResult.sale_id ||
-            null
+        typeof saleResult === "object" && saleResult !== null
+          ? saleResult.id || saleResult.sale_id || null
           : saleResult;
 
       const receiptSale = {
         id: saleId,
-        sale_number:
-          saleNumber,
-        created_at:
-          new Date().toISOString(),
-        customer_name:
-          customerName,
+        sale_number: saleNumber,
+        created_at: new Date().toISOString(),
+        customer_name: customerName,
         subtotal,
-        tax_amount:
-          tax,
-        discount_amount:
-          discount,
-        total_amount:
-          total,
-        amount_paid:
-          paid,
-        change_amount:
-          change,
-        balance_amount:
-          balance,
-        payment_method:
-          paymentMethod,
+        tax_amount: tax,
+        discount_amount: discount,
+        total_amount: total,
+        amount_paid: paid,
+        change_amount: change,
+        balance_amount: balance,
+        payment_method: paymentMethod,
         transaction_reference:
-          transactionReference.trim() ||
-          null,
-        items: cart.map(
-          (item) => ({
-            ...item,
-            line_total:
-              Number(
-                item.selling_price ||
-                  0
-              ) *
-              Number(
-                item.quantity || 0
-              ),
-          })
-        ),
+          transactionReference.trim() || null,
+        items: cart.map((item) => ({
+          ...item,
+          line_total:
+            Number(item.selling_price || 0) *
+            Number(item.quantity || 0),
+        })),
       };
 
-      setCompletedSale(
-        receiptSale
-      );
+      setCompletedSale(receiptSale);
 
       setSuccessMessage(
         `Sale ${saleNumber} completed successfully.`
@@ -1025,14 +1140,10 @@ function Sales() {
         barcodeInputRef.current?.focus();
       }, 200);
     } catch (error) {
-      console.error(
-        "Complete sale error:",
-        error
-      );
+      console.error("Complete sale error:", error);
 
       setErrorMessage(
-        error.message ||
-          "Failed to complete sale."
+        error.message || "Failed to complete sale."
       );
     } finally {
       setProcessingSale(false);
@@ -1040,36 +1151,20 @@ function Sales() {
   };
 
   /*
-   * ---------------------------------------------------------
    * CUSTOMER CHANGE
-   * ---------------------------------------------------------
-   *
-   * If the cashier selects a customer who already has
-   * a phone number, automatically use that phone number
-   * for M-Pesa.
    */
-  const handleCustomerChange = (
-    event
-  ) => {
-    const customerId =
-      event.target.value;
+  const handleCustomerChange = (event) => {
+    const customerId = event.target.value;
 
-    setSelectedCustomer(
-      customerId
-    );
+    setSelectedCustomer(customerId);
 
     if (customerId) {
-      const customer =
-        customers.find(
-          (item) =>
-            String(item.id) ===
-            String(customerId)
-        );
+      const customer = customers.find(
+        (item) => String(item.id) === String(customerId)
+      );
 
       if (customer?.phone) {
-        setMpesaPhoneNumber(
-          customer.phone
-        );
+        setMpesaPhoneNumber(customer.phone);
       }
     } else {
       setMpesaPhoneNumber("");
@@ -1077,33 +1172,27 @@ function Sales() {
   };
 
   /*
-   * ---------------------------------------------------------
    * PAYMENT METHOD CHANGE
-   * ---------------------------------------------------------
    */
-  const handlePaymentMethodChange = (
-    method
-  ) => {
+  const handlePaymentMethodChange = (method) => {
     setPaymentMethod(method);
     setErrorMessage("");
     setSuccessMessage("");
 
     if (method === "mpesa") {
-      const customer =
-        customers.find(
-          (item) =>
-            String(item.id) ===
-            String(selectedCustomer)
-        );
+      const customer = customers.find(
+        (item) => String(item.id) === String(selectedCustomer)
+      );
 
       if (customer?.phone) {
-        setMpesaPhoneNumber(
-          customer.phone
-        );
+        setMpesaPhoneNumber(customer.phone);
       }
     }
   };
 
+  /*
+   * LOADING SCREEN
+   */
   if (loading) {
     return (
       <div className="jesta-sales-page">
@@ -1112,9 +1201,7 @@ function Sales() {
             className="animate-spin"
             size={24}
           />
-          <span>
-            Loading sales workspace...
-          </span>
+          <span>Loading sales workspace...</span>
         </div>
       </div>
     );
@@ -1136,7 +1223,6 @@ function Sales() {
                   <h2 className="font-semibold text-slate-900">
                     Scan Product Barcode
                   </h2>
-
                   <p className="text-xs text-slate-500">
                     Use your phone camera to scan
                   </p>
@@ -1145,9 +1231,7 @@ function Sales() {
 
               <button
                 type="button"
-                onClick={
-                  closeCameraScanner
-                }
+                onClick={closeCameraScanner}
                 className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
                 aria-label="Close camera scanner"
               >
@@ -1158,9 +1242,7 @@ function Sales() {
             <div className="bg-slate-950 p-4">
               <div className="relative overflow-hidden rounded-xl bg-black">
                 <video
-                  ref={
-                    cameraVideoRef
-                  }
+                  ref={cameraVideoRef}
                   className="aspect-[4/3] w-full object-cover"
                   autoPlay
                   muted
@@ -1173,7 +1255,6 @@ function Sales() {
                     <div className="absolute right-0 top-0 h-8 w-8 border-r-4 border-t-4 border-teal-400" />
                     <div className="absolute bottom-0 left-0 h-8 w-8 border-b-4 border-l-4 border-teal-400" />
                     <div className="absolute bottom-0 right-0 h-8 w-8 border-b-4 border-r-4 border-teal-400" />
-
                     <div className="absolute left-3 right-3 top-1/2 h-0.5 -translate-y-1/2 bg-teal-400 shadow-[0_0_12px_rgba(45,212,191,0.9)]" />
                   </div>
                 </div>
@@ -1185,11 +1266,9 @@ function Sales() {
                         size={28}
                         className="mx-auto animate-spin text-teal-400"
                       />
-
                       <p className="mt-3 text-sm font-medium">
                         Starting camera...
                       </p>
-
                       <p className="mt-1 text-xs text-slate-300">
                         Please allow camera access if prompted.
                       </p>
@@ -1200,14 +1279,8 @@ function Sales() {
 
               {cameraError && (
                 <div className="mt-4 flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-950/50 p-3 text-sm text-red-200">
-                  <X
-                    size={18}
-                    className="mt-0.5 shrink-0"
-                  />
-
-                  <div className="flex-1">
-                    {cameraError}
-                  </div>
+                  <X size={18} className="mt-0.5 shrink-0" />
+                  <div className="flex-1">{cameraError}</div>
                 </div>
               )}
 
@@ -1215,10 +1288,8 @@ function Sales() {
                 <p className="text-sm font-medium text-white">
                   Point your camera at a product barcode
                 </p>
-
                 <p className="mt-1 text-xs text-slate-400">
-                  Keep the barcode inside the frame until it
-                  is detected.
+                  Keep the barcode inside the frame until it is detected.
                 </p>
               </div>
             </div>
@@ -1226,9 +1297,7 @@ function Sales() {
             <div className="border-t border-slate-200 bg-white p-4">
               <button
                 type="button"
-                onClick={
-                  closeCameraScanner
-                }
+                onClick={closeCameraScanner}
                 className="jesta-btn w-full justify-center border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
               >
                 <X size={18} />
@@ -1239,52 +1308,36 @@ function Sales() {
         </div>
       )}
 
+      {/* HEADER */}
       <div className="jesta-sales-header mb-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="jesta-sales-brand mb-1 text-sm font-semibold uppercase tracking-wider">
               JESTA POS
             </div>
-
-            <h1 className="text-2xl font-bold">
-              Sales
-            </h1>
-
+            <h1 className="text-2xl font-bold">Sales</h1>
             <p className="mt-1 text-sm text-slate-300">
-              Create sales, process payments and manage your
-              customer transactions.
+              Create sales, process payments and manage your customer transactions.
             </p>
           </div>
 
           <div className="jesta-sales-cart-count flex items-center gap-2 rounded-lg px-4 py-3">
             <ShoppingCart size={20} />
-
             <span className="text-sm font-medium">
-              {cart.length} item
-              {cart.length === 1
-                ? ""
-                : "s"} in cart
+              {cart.length} item{cart.length === 1 ? "" : "s"} in cart
             </span>
           </div>
         </div>
       </div>
 
+      {/* ERROR MESSAGE */}
       {errorMessage && (
         <div className="mb-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <X
-            size={18}
-            className="mt-0.5 shrink-0"
-          />
-
-          <div className="flex-1">
-            {errorMessage}
-          </div>
-
+          <X size={18} className="mt-0.5 shrink-0" />
+          <div className="flex-1">{errorMessage}</div>
           <button
             type="button"
-            onClick={() =>
-              setErrorMessage("")
-            }
+            onClick={() => setErrorMessage("")}
             className="shrink-0"
           >
             <X size={16} />
@@ -1292,22 +1345,14 @@ function Sales() {
         </div>
       )}
 
+      {/* SUCCESS MESSAGE */}
       {successMessage && (
         <div className="mb-4 flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700">
-          <CheckCircle
-            size={18}
-            className="mt-0.5 shrink-0"
-          />
-
-          <div className="flex-1">
-            {successMessage}
-          </div>
-
+          <CheckCircle size={18} className="mt-0.5 shrink-0" />
+          <div className="flex-1">{successMessage}</div>
           <button
             type="button"
-            onClick={() =>
-              setSuccessMessage("")
-            }
+            onClick={() => setSuccessMessage("")}
             className="shrink-0"
           >
             <X size={16} />
@@ -1315,6 +1360,7 @@ function Sales() {
         </div>
       )}
 
+      {/* COMPLETED SALE RECEIPT */}
       {completedSale && (
         <div className="jesta-receipt-section mb-6 rounded-xl p-5">
           <div className="mb-4 flex items-center justify-between">
@@ -1322,7 +1368,6 @@ function Sales() {
               <h2 className="font-semibold text-slate-900">
                 Sale Completed
               </h2>
-
               <p className="text-sm text-slate-600">
                 Receipt is ready for printing.
               </p>
@@ -1330,11 +1375,7 @@ function Sales() {
 
             <button
               type="button"
-              onClick={() =>
-                setCompletedSale(
-                  null
-                )
-              }
+              onClick={() => setCompletedSale(null)}
               className="rounded-lg p-2 text-slate-500 hover:bg-white"
             >
               <X size={18} />
@@ -1345,19 +1386,163 @@ function Sales() {
         </div>
       )}
 
+      {/* -------------------------------------------------- */}
+      {/* PARKED / HELD SALES */}
+      {/* -------------------------------------------------- */}
+      <section className="jesta-sales-section mb-6 overflow-hidden rounded-xl">
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-amber-50 p-2 text-amber-700">
+              <PauseCircle size={21} />
+            </div>
+
+            <div>
+              <h2 className="font-semibold text-slate-900">
+                Held Sales ({parkedSales.length})
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Save unfinished orders and resume them when ready.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={loadParkedSales}
+            disabled={loadingParkedSales || processingSale}
+            className="jesta-btn justify-center border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <RefreshCw
+              size={16}
+              className={loadingParkedSales ? "animate-spin" : ""}
+            />
+            Refresh
+          </button>
+        </div>
+
+        {loadingParkedSales ? (
+          <div className="p-6 text-center text-sm text-slate-500">
+            <RefreshCw
+              size={20}
+              className="mx-auto mb-2 animate-spin"
+            />
+            Loading held sales...
+          </div>
+        ) : parkedSales.length === 0 ? (
+          <div className="p-8 text-center">
+            <Clock
+              size={30}
+              className="mx-auto text-slate-300"
+            />
+            <h3 className="mt-3 font-medium text-slate-800">
+              No held sales
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Add products to the cart and select Hold Sale to save an unfinished order.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
+            {parkedSales.map((sale) => {
+              const items = Array.isArray(sale.items)
+                ? sale.items
+                : [];
+
+              const itemCount = items.reduce(
+                (sum, item) =>
+                  sum + Number(item.quantity || 0),
+                0
+              );
+
+              return (
+                <div
+                  key={sale.id}
+                  className="rounded-xl border border-slate-200 bg-white p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate font-semibold text-slate-900">
+                        {sale.customer_name || "Walk-in Customer"}
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {sale.sale_number}
+                      </p>
+                    </div>
+
+                    <span className="shrink-0 rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+                      On hold
+                    </span>
+                  </div>
+
+                  <div className="mt-4 space-y-2 text-sm text-slate-600">
+                    <div className="flex justify-between gap-2">
+                      <span>Quantity</span>
+                      <span className="font-medium text-slate-900">
+                        {itemCount}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between gap-2">
+                      <span>Total</span>
+                      <span className="font-bold text-slate-900">
+                        {formatCurrency(sale.total_amount)}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between gap-2">
+                      <span>Payment method</span>
+                      <span className="capitalize">
+                        {sale.payment_method || "cash"}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-slate-400">
+                      Held {new Date(sale.created_at).toLocaleString("en-KE")}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => resumeParkedSale(sale)}
+                      disabled={processingSale}
+                      className="jesta-btn jesta-sales-primary flex-1 justify-center disabled:opacity-50"
+                    >
+                      <RotateCcw size={16} />
+                      Resume Sale
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => deleteParkedSale(sale)}
+                      disabled={processingSale}
+                      className="jesta-btn justify-center border border-red-200 bg-white text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      title="Delete parked sale"
+                      aria-label="Delete parked sale"
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* MAIN SALES WORKSPACE */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        {/* PRODUCTS */}
         <section className="jesta-sales-section overflow-hidden">
           <div className="border-b border-slate-200 p-5">
             <div className="mb-4 flex items-center gap-3">
               <div className="rounded-lg bg-teal-50 p-2 text-teal-700">
                 <ShoppingCart size={20} />
               </div>
-
               <div>
                 <h2 className="font-semibold text-slate-900">
                   Products
                 </h2>
-
                 <p className="text-sm text-slate-500">
                   Select products or scan a barcode.
                 </p>
@@ -1365,33 +1550,17 @@ function Sales() {
             </div>
 
             {/* BARCODE SCANNING */}
-            <form
-              onSubmit={
-                handleBarcodeScan
-              }
-              className="mb-4 flex gap-2"
-            >
+            <form onSubmit={handleBarcodeScan} className="mb-4 flex gap-2">
               <div className="relative flex-1">
                 <ScanBarcode
                   size={18}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                 />
-
                 <input
-                  ref={
-                    barcodeInputRef
-                  }
+                  ref={barcodeInputRef}
                   type="text"
-                  value={
-                    barcodeInput
-                  }
-                  onChange={(
-                    event
-                  ) =>
-                    setBarcodeInput(
-                      event.target.value
-                    )
-                  }
+                  value={barcodeInput}
+                  onChange={(event) => setBarcodeInput(event.target.value)}
                   placeholder="Scan or enter barcode..."
                   className="jesta-input w-full pl-10"
                 />
@@ -1399,213 +1568,143 @@ function Sales() {
 
               <button
                 type="submit"
-                disabled={
-                  scanningBarcode ||
-                  !barcodeInput.trim()
-                }
+                disabled={scanningBarcode || !barcodeInput.trim()}
                 className="jesta-btn jesta-sales-primary"
               >
                 {scanningBarcode ? (
-                  <RefreshCw
-                    size={18}
-                    className="animate-spin"
-                  />
+                  <RefreshCw size={18} className="animate-spin" />
                 ) : (
-                  <ScanBarcode
-                    size={18}
-                  />
+                  <ScanBarcode size={18} />
                 )}
-
-                <span className="hidden sm:inline">
-                  Scan
-                </span>
+                <span className="hidden sm:inline">Scan</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => {
                   setCameraError("");
-                  setCameraScannerOpen(
-                    true
-                  );
+                  setCameraScannerOpen(true);
                 }}
-                disabled={
-                  scanningBarcode
-                }
+                disabled={scanningBarcode}
                 className="jesta-btn border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 title="Scan using phone camera"
               >
                 <Camera size={18} />
-
-                <span className="hidden sm:inline">
-                  Camera
-                </span>
+                <span className="hidden sm:inline">Camera</span>
               </button>
             </form>
 
+            {/* PRODUCT SEARCH */}
             <div className="relative">
               <Search
                 size={18}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               />
-
               <input
                 type="text"
                 value={searchTerm}
-                onChange={(
-                  event
-                ) =>
-                  setSearchTerm(
-                    event.target.value
-                  )
-                }
+                onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="Search products by name, SKU or barcode..."
                 className="jesta-sales-search w-full rounded-lg py-3 pl-10 pr-4 outline-none"
               />
             </div>
           </div>
 
+          {/* PRODUCT LIST */}
           <div className="p-5">
-            {filteredProducts.length ===
-            0 ? (
+            {filteredProducts.length === 0 ? (
               <div className="py-12 text-center">
                 <PackageIconFallback />
-
                 <h3 className="mt-3 font-medium text-slate-900">
                   No products found
                 </h3>
-
                 <p className="mt-1 text-sm text-slate-500">
                   Try a different search term.
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredProducts.map(
-                  (product) => {
-                    const stock =
-                      Number(
-                        product.stock_quantity ||
-                          0
-                      );
+                {filteredProducts.map((product) => {
+                  const stock = Number(product.stock_quantity || 0);
+                  const lowStock = stock > 0 && stock <= 5;
+                  const outOfStock = stock <= 0;
 
-                    const lowStock =
-                      stock > 0 &&
-                      stock <= 5;
-
-                    const outOfStock =
-                      stock <= 0;
-
-                    return (
-                      <div
-                        key={
-                          product.id
-                        }
-                        className="jesta-product p-4"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="jesta-product-icon flex h-11 w-11 items-center justify-center rounded-lg">
-                            <ShoppingCart
-                              size={
-                                20
-                              }
-                            />
-                          </div>
-
-                          {outOfStock ? (
-                            <span className="jesta-stock-out rounded-full px-2 py-1 text-xs font-semibold">
-                              Out of stock
-                            </span>
-                          ) : lowStock ? (
-                            <span className="jesta-stock-low rounded-full px-2 py-1 text-xs font-semibold">
-                              Low stock
-                            </span>
-                          ) : (
-                            <span className="jesta-stock-good rounded-full px-2 py-1 text-xs font-semibold">
-                              {stock} in stock
-                            </span>
-                          )}
+                  return (
+                    <div
+                      key={product.id}
+                      className="jesta-product p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="jesta-product-icon flex h-11 w-11 items-center justify-center rounded-lg">
+                          <ShoppingCart size={20} />
                         </div>
 
-                        <div className="mt-4">
-                          <h3 className="line-clamp-2 min-h-[48px] font-semibold text-slate-900">
-                            {
-                              product.name
-                            }
-                          </h3>
+                        {outOfStock ? (
+                          <span className="jesta-stock-out rounded-full px-2 py-1 text-xs font-semibold">
+                            Out of stock
+                          </span>
+                        ) : lowStock ? (
+                          <span className="jesta-stock-low rounded-full px-2 py-1 text-xs font-semibold">
+                            Low stock
+                          </span>
+                        ) : (
+                          <span className="jesta-stock-good rounded-full px-2 py-1 text-xs font-semibold">
+                            {stock} in stock
+                          </span>
+                        )}
+                      </div>
 
-                          {product.sku && (
-                            <p className="mt-1 text-xs text-slate-500">
-                              SKU:{" "}
-                              {
-                                product.sku
-                              }
-                            </p>
-                          )}
+                      <div className="mt-4">
+                        <h3 className="line-clamp-2 min-h-[48px] font-semibold text-slate-900">
+                          {product.name}
+                        </h3>
 
-                          <div className="mt-3 flex items-center justify-between gap-3">
-                            <span className="jesta-product-price text-lg font-bold">
-                              {formatCurrency(
-                                product.selling_price
-                              )}
-                            </span>
+                        {product.sku && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            SKU: {product.sku}
+                          </p>
+                        )}
 
-                            <button
-                              type="button"
-                              onClick={() =>
-                                addToCart(
-                                  product
-                                )
-                              }
-                              disabled={
-                                outOfStock
-                              }
-                              className="jesta-product-add flex h-9 w-9 items-center justify-center rounded-lg transition disabled:cursor-not-allowed disabled:opacity-40"
-                              title="Add to cart"
-                            >
-                              <Plus
-                                size={
-                                  18
-                                }
-                              />
-                            </button>
-                          </div>
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <span className="jesta-product-price text-lg font-bold">
+                            {formatCurrency(product.selling_price)}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => addToCart(product)}
+                            disabled={outOfStock}
+                            className="jesta-product-add flex h-9 w-9 items-center justify-center rounded-lg transition disabled:cursor-not-allowed disabled:opacity-40"
+                            title="Add to cart"
+                          >
+                            <Plus size={18} />
+                          </button>
                         </div>
                       </div>
-                    );
-                  }
-                )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
         </section>
 
+        {/* CART AND PAYMENT */}
         <aside className="jesta-cart-panel flex min-h-[600px] flex-col overflow-hidden bg-white">
           <div className="jesta-cart-header p-5 text-white">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="font-semibold">
-                  Current Sale
-                </h2>
-
+                <h2 className="font-semibold">Current Sale</h2>
                 <p className="mt-1 text-sm text-slate-300">
-                  {cart.length} product
-                  {cart.length ===
-                  1
-                    ? ""
-                    : "s"}
+                  {cart.length} product{cart.length === 1 ? "" : "s"}
                 </p>
               </div>
 
               {cart.length > 0 && (
                 <button
                   type="button"
-                  onClick={
-                    clearCart
-                  }
-                  disabled={
-                    processingSale
-                  }
+                  onClick={clearCart}
+                  disabled={processingSale}
                   className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10 disabled:opacity-50"
                 >
                   Clear
@@ -1614,211 +1713,132 @@ function Sales() {
             </div>
           </div>
 
+          {/* CART ITEMS */}
           <div className="flex-1 overflow-y-auto p-4">
-            {cart.length ===
-            0 ? (
+            {cart.length === 0 ? (
               <div className="flex min-h-[300px] flex-col items-center justify-center text-center">
                 <div className="rounded-full bg-slate-100 p-4 text-slate-400">
-                  <ShoppingCart
-                    size={30}
-                  />
+                  <ShoppingCart size={30} />
                 </div>
-
                 <h3 className="mt-4 font-semibold text-slate-900">
                   Cart is empty
                 </h3>
-
                 <p className="mt-1 max-w-xs text-sm text-slate-500">
-                  Add products from the product list to
-                  start a new sale.
+                  Add products from the product list to start a new sale.
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
-                {cart.map(
-                  (item) => {
-                    const lineTotal =
-                      Number(
-                        item.selling_price ||
-                          0
-                      ) *
-                      Number(
-                        item.quantity ||
-                          0
-                      );
+                {cart.map((item) => {
+                  const lineTotal =
+                    Number(item.selling_price || 0) *
+                    Number(item.quantity || 0);
 
-                    return (
-                      <div
-                        key={
-                          item.id
-                        }
-                        className="jesta-cart-item p-3"
-                      >
-                        <div className="flex gap-3">
-                          <div className="jesta-product-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
-                            <ShoppingCart
-                              size={
-                                17
-                              }
-                            />
+                  return (
+                    <div
+                      key={item.id}
+                      className="jesta-cart-item p-3"
+                    >
+                      <div className="flex gap-3">
+                        <div className="jesta-product-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
+                          <ShoppingCart size={17} />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <h3 className="line-clamp-2 text-sm font-semibold text-slate-900">
+                                {item.name}
+                              </h3>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {formatCurrency(item.selling_price)} each
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeFromCart(item.id)}
+                              disabled={processingSale}
+                              className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                              title="Remove item"
+                            >
+                              <Trash2 size={16} />
+                            </button>
                           </div>
 
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <h3 className="line-clamp-2 text-sm font-semibold text-slate-900">
-                                  {
-                                    item.name
-                                  }
-                                </h3>
+                          <div className="mt-3 flex items-center justify-between">
+                            <div className="flex items-center rounded-lg border border-slate-200 bg-white">
+                              <button
+                                type="button"
+                                onClick={() => updateQuantity(item.id, -1)}
+                                disabled={processingSale}
+                                className="p-2 text-slate-500 hover:text-slate-900 disabled:opacity-50"
+                              >
+                                <Minus size={14} />
+                              </button>
 
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {formatCurrency(
-                                    item.selling_price
-                                  )}{" "}
-                                  each
-                                </p>
-                              </div>
+                              <span className="min-w-[32px] text-center text-sm font-semibold">
+                                {item.quantity}
+                              </span>
 
                               <button
                                 type="button"
-                                onClick={() =>
-                                  removeFromCart(
-                                    item.id
-                                  )
-                                }
-                                disabled={
-                                  processingSale
-                                }
-                                className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                                title="Remove item"
+                                onClick={() => updateQuantity(item.id, 1)}
+                                disabled={processingSale}
+                                className="p-2 text-slate-500 hover:text-slate-900 disabled:opacity-50"
                               >
-                                <Trash2
-                                  size={
-                                    16
-                                  }
-                                />
+                                <Plus size={14} />
                               </button>
                             </div>
 
-                            <div className="mt-3 flex items-center justify-between">
-                              <div className="flex items-center rounded-lg border border-slate-200 bg-white">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    updateQuantity(
-                                      item.id,
-                                      -1
-                                    )
-                                  }
-                                  disabled={
-                                    processingSale
-                                  }
-                                  className="p-2 text-slate-500 hover:text-slate-900 disabled:opacity-50"
-                                >
-                                  <Minus
-                                    size={
-                                      14
-                                    }
-                                  />
-                                </button>
-
-                                <span className="min-w-[32px] text-center text-sm font-semibold">
-                                  {
-                                    item.quantity
-                                  }
-                                </span>
-
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    updateQuantity(
-                                      item.id,
-                                      1
-                                    )
-                                  }
-                                  disabled={
-                                    processingSale
-                                  }
-                                  className="p-2 text-slate-500 hover:text-slate-900 disabled:opacity-50"
-                                >
-                                  <Plus
-                                    size={
-                                      14
-                                    }
-                                  />
-                                </button>
-                              </div>
-
-                              <span className="text-sm font-bold text-slate-900">
-                                {formatCurrency(
-                                  lineTotal
-                                )}
-                              </span>
-                            </div>
+                            <span className="text-sm font-bold text-slate-900">
+                              {formatCurrency(lineTotal)}
+                            </span>
                           </div>
                         </div>
                       </div>
-                    );
-                  }
-                )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
 
+          {/* CHECKOUT */}
           <div className="border-t border-slate-200 bg-white p-4">
             <div className="space-y-2 text-sm">
               <div className="flex justify-between text-slate-600">
-                <span>
-                  Subtotal
-                </span>
-
+                <span>Subtotal</span>
                 <span className="font-medium">
-                  {formatCurrency(
-                    subtotal
-                  )}
+                  {formatCurrency(subtotal)}
                 </span>
               </div>
 
               <div className="flex justify-between text-slate-600">
-                <span>
-                  Tax
-                </span>
-
+                <span>Tax</span>
                 <span className="font-medium">
-                  {formatCurrency(
-                    tax
-                  )}
+                  {formatCurrency(tax)}
                 </span>
               </div>
 
               <div className="flex justify-between text-slate-600">
-                <span>
-                  Discount
-                </span>
-
+                <span>Discount</span>
                 <span className="font-medium">
-                  {formatCurrency(
-                    discount
-                  )}
+                  {formatCurrency(discount)}
                 </span>
               </div>
             </div>
 
             <div className="jesta-total-box mt-4 rounded-xl p-4 text-white">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-300">
-                  Total
-                </span>
-
+                <span className="text-sm text-slate-300">Total</span>
                 <span className="jesta-total-value text-2xl font-bold">
-                  {formatCurrency(
-                    total
-                  )}
+                  {formatCurrency(total)}
                 </span>
               </div>
             </div>
 
+            {/* CUSTOMER */}
             <div className="mt-5">
               <label className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-700">
                 <User size={16} />
@@ -1826,43 +1846,22 @@ function Sales() {
               </label>
 
               <select
-                value={
-                  selectedCustomer
-                }
-                onChange={
-                  handleCustomerChange
-                }
-                disabled={
-                  processingSale
-                }
+                value={selectedCustomer}
+                onChange={handleCustomerChange}
+                disabled={processingSale}
                 className="jesta-select w-full"
               >
-                <option value="">
-                  Walk-in Customer
-                </option>
-
-                {customers.map(
-                  (customer) => (
-                    <option
-                      key={
-                        customer.id
-                      }
-                      value={
-                        customer.id
-                      }
-                    >
-                      {
-                        customer.name
-                      }
-                      {customer.phone
-                        ? ` — ${customer.phone}`
-                        : ""}
-                    </option>
-                  )
-                )}
+                <option value="">Walk-in Customer</option>
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
+                    {customer.phone ? ` — ${customer.phone}` : ""}
+                  </option>
+                ))}
               </select>
             </div>
 
+            {/* PAYMENT METHOD */}
             <div className="mt-5">
               <label className="mb-2 block text-sm font-medium text-slate-700">
                 Payment Method
@@ -1871,107 +1870,57 @@ function Sales() {
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  onClick={() =>
-                    handlePaymentMethodChange(
-                      "cash"
-                    )
-                  }
-                  disabled={
-                    processingSale
-                  }
+                  onClick={() => handlePaymentMethodChange("cash")}
+                  disabled={processingSale}
                   className={`jesta-payment-method flex flex-col items-center gap-1 rounded-lg p-3 text-xs font-medium ${
-                    paymentMethod ===
-                    "cash"
-                      ? "active"
-                      : ""
+                    paymentMethod === "cash" ? "active" : ""
                   }`}
                 >
-                  <Banknote
-                    size={
-                      19
-                    }
-                  />
+                  <Banknote size={19} />
                   Cash
                 </button>
 
                 <button
                   type="button"
-                  onClick={() =>
-                    handlePaymentMethodChange(
-                      "mpesa"
-                    )
-                  }
-                  disabled={
-                    processingSale
-                  }
+                  onClick={() => handlePaymentMethodChange("mpesa")}
+                  disabled={processingSale}
                   className={`jesta-payment-method flex flex-col items-center gap-1 rounded-lg p-3 text-xs font-medium ${
-                    paymentMethod ===
-                    "mpesa"
-                      ? "active"
-                      : ""
+                    paymentMethod === "mpesa" ? "active" : ""
                   }`}
                 >
-                  <Smartphone
-                    size={
-                      19
-                    }
-                  />
+                  <Smartphone size={19} />
                   M-Pesa
                 </button>
 
                 <button
                   type="button"
-                  onClick={() =>
-                    handlePaymentMethodChange(
-                      "card"
-                    )
-                  }
-                  disabled={
-                    processingSale
-                  }
+                  onClick={() => handlePaymentMethodChange("card")}
+                  disabled={processingSale}
                   className={`jesta-payment-method flex flex-col items-center gap-1 rounded-lg p-3 text-xs font-medium ${
-                    paymentMethod ===
-                    "card"
-                      ? "active"
-                      : ""
+                    paymentMethod === "card" ? "active" : ""
                   }`}
                 >
-                  <CreditCard
-                    size={
-                      19
-                    }
-                  />
+                  <CreditCard size={19} />
                   Card
                 </button>
               </div>
             </div>
 
             {/* M-PESA PHONE NUMBER */}
-            {paymentMethod ===
-              "mpesa" && (
+            {paymentMethod === "mpesa" && (
               <div className="mt-5 rounded-xl border border-teal-100 bg-teal-50 p-4">
                 <div className="mb-3 flex items-start gap-3">
                   <div className="rounded-lg bg-white p-2 text-teal-700 shadow-sm">
-                    <Smartphone
-                      size={
-                        18
-                      }
-                    />
+                    <Smartphone size={18} />
                   </div>
 
                   <div>
                     <p className="text-sm font-semibold text-teal-900">
                       M-Pesa Payment
                     </p>
-
                     <p className="mt-1 text-xs text-teal-700">
                       The customer will receive an M-Pesa prompt for{" "}
-                      <strong>
-                        {formatCurrency(
-                          total
-                        )}
-                      </strong>
-                      .
+                      <strong>{formatCurrency(total)}</strong>.
                     </p>
                   </div>
                 </div>
@@ -1982,19 +1931,11 @@ function Sales() {
 
                 <input
                   type="tel"
-                  value={
-                    mpesaPhoneNumber
+                  value={mpesaPhoneNumber}
+                  onChange={(event) =>
+                    setMpesaPhoneNumber(event.target.value)
                   }
-                  onChange={(
-                    event
-                  ) =>
-                    setMpesaPhoneNumber(
-                      event.target.value
-                    )
-                  }
-                  disabled={
-                    processingSale
-                  }
+                  disabled={processingSale}
                   placeholder="e.g. 0712345678"
                   className="jesta-input w-full"
                 />
@@ -2006,8 +1947,7 @@ function Sales() {
             )}
 
             {/* TRANSACTION REFERENCE */}
-            {paymentMethod !==
-              "mpesa" && (
+            {paymentMethod !== "mpesa" && (
               <div className="mt-5">
                 <label className="mb-2 block text-sm font-medium text-slate-700">
                   Transaction Reference
@@ -2015,22 +1955,13 @@ function Sales() {
 
                 <input
                   type="text"
-                  value={
-                    transactionReference
+                  value={transactionReference}
+                  onChange={(event) =>
+                    setTransactionReference(event.target.value)
                   }
-                  onChange={(
-                    event
-                  ) =>
-                    setTransactionReference(
-                      event.target.value
-                    )
-                  }
-                  disabled={
-                    processingSale
-                  }
+                  disabled={processingSale}
                   placeholder={
-                    paymentMethod ===
-                    "card"
+                    paymentMethod === "card"
                       ? "Card transaction reference"
                       : "Optional reference"
                   }
@@ -2040,8 +1971,7 @@ function Sales() {
             )}
 
             {/* AMOUNT PAID */}
-            {paymentMethod !==
-              "mpesa" ? (
+            {paymentMethod !== "mpesa" ? (
               <div className="mt-5">
                 <label className="mb-2 block text-sm font-medium text-slate-700">
                   Amount Paid
@@ -2051,19 +1981,11 @@ function Sales() {
                   type="number"
                   min="0"
                   step="0.01"
-                  value={
-                    amountPaid
+                  value={amountPaid}
+                  onChange={(event) =>
+                    setAmountPaid(event.target.value)
                   }
-                  onChange={(
-                    event
-                  ) =>
-                    setAmountPaid(
-                      event.target.value
-                    )
-                  }
-                  disabled={
-                    processingSale
-                  }
+                  disabled={processingSale}
                   placeholder="Enter amount paid"
                   className="jesta-input w-full text-lg font-semibold"
                 />
@@ -2074,118 +1996,92 @@ function Sales() {
                   <span className="text-sm font-medium text-slate-600">
                     Amount to Pay
                   </span>
-
                   <span className="text-lg font-bold text-slate-900">
-                    {formatCurrency(
-                      total
-                    )}
+                    {formatCurrency(total)}
                   </span>
                 </div>
 
                 <p className="mt-1 text-xs text-slate-500">
-                  Amount will be recorded automatically after the customer pays.
+                  Amount will be recorded after the customer pays.
                 </p>
               </div>
             )}
 
+            {/* CHANGE AND BALANCE */}
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div className="rounded-lg bg-green-50 p-3">
                 <p className="text-xs font-medium text-green-700">
                   Change
                 </p>
-
                 <p className="mt-1 text-base font-bold text-green-800">
                   {formatCurrency(
-                    paymentMethod ===
-                      "mpesa"
-                      ? 0
-                      : change
+                    paymentMethod === "mpesa" ? 0 : change
                   )}
                 </p>
               </div>
 
               <div className="rounded-lg bg-amber-50 p-3">
                 <p className="text-xs font-medium text-amber-700">
-                  {paymentMethod ===
-                  "mpesa"
-                    ? "Awaiting"
-                    : "Balance"}
+                  {paymentMethod === "mpesa" ? "Awaiting" : "Balance"}
                 </p>
-
                 <p className="mt-1 text-base font-bold text-amber-800">
                   {formatCurrency(
-                    paymentMethod ===
-                      "mpesa"
-                      ? total
-                      : balance
+                    paymentMethod === "mpesa" ? total : balance
                   )}
                 </p>
               </div>
             </div>
 
-            <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {/* HOLD SALE */}
+            <button
+              type="button"
+              onClick={parkCurrentSale}
+              disabled={processingSale || cart.length === 0}
+              className="jesta-btn mt-5 mb-3 w-full justify-center border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <PauseCircle size={18} />
+              Hold Sale
+            </button>
+
+            {/* COMPLETE SALE / CLEAR CART */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="button"
-                onClick={
-                  handleCompleteSale
-                }
+                onClick={handleCompleteSale}
                 disabled={
                   processingSale ||
-                  cart.length ===
-                    0 ||
-                  (paymentMethod !==
-                    "mpesa" &&
-                    paid < total) ||
-                  (paymentMethod ===
-                    "mpesa" &&
+                  cart.length === 0 ||
+                  (paymentMethod !== "mpesa" && paid < total) ||
+                  (paymentMethod === "mpesa" &&
                     !mpesaPhoneNumber.trim())
                 }
                 className="jesta-complete-sale jesta-btn justify-center sm:col-span-1"
               >
                 {processingSale ? (
                   <RefreshCw
-                    size={
-                      18
-                    }
+                    size={18}
                     className="animate-spin"
                   />
                 ) : (
-                  <CheckCircle
-                    size={
-                      18
-                    }
-                  />
+                  <CheckCircle size={18} />
                 )}
 
                 {processingSale
-                  ? paymentMethod ===
-                    "mpesa"
+                  ? paymentMethod === "mpesa"
                     ? "Waiting for Payment..."
                     : "Processing..."
-                  : paymentMethod ===
-                    "mpesa"
-                  ? "Send M-Pesa Prompt"
-                  : "Complete Sale"}
+                  : paymentMethod === "mpesa"
+                    ? "Send M-Pesa Prompt"
+                    : "Complete Sale"}
               </button>
 
               <button
                 type="button"
-                onClick={
-                  clearCart
-                }
-                disabled={
-                  processingSale ||
-                  cart.length ===
-                    0
-                }
+                onClick={clearCart}
+                disabled={processingSale || cart.length === 0}
                 className="jesta-btn justify-center border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Trash2
-                  size={
-                    18
-                  }
-                />
-
+                <Trash2 size={18} />
                 Clear Cart
               </button>
             </div>
