@@ -1,0 +1,578 @@
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const jsonResponse = (
+  body: Record<string, unknown>,
+  status = 200
+) => {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json",
+    },
+  });
+};
+
+const normalizePhoneNumber = (phoneNumber: string) => {
+  const cleaned = String(phoneNumber || "")
+    .trim()
+    .replace(/\s+/g, "");
+
+  if (cleaned.startsWith("07") && cleaned.length === 10) {
+    return `254${cleaned.substring(1)}`;
+  }
+
+  if (cleaned.startsWith("01") && cleaned.length === 10) {
+    return `254${cleaned.substring(1)}`;
+  }
+
+  if (cleaned.startsWith("+254") && cleaned.length === 13) {
+    return cleaned.substring(1);
+  }
+
+  if (cleaned.startsWith("254") && cleaned.length === 12) {
+    return cleaned;
+  }
+
+  throw new Error(
+    "Invalid Kenyan phone number. Use 07XXXXXXXX, 01XXXXXXXX or 254XXXXXXXXX."
+  );
+};
+
+const getTimestamp = () => {
+  const now = new Date();
+
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  const seconds = String(now.getSeconds()).padStart(2, "0");
+
+  return `${year}${month}${day}${hours}${minutes}${seconds}`;
+};
+
+const base64Encode = (value: string) => {
+  return btoa(value);
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      headers: corsHeaders,
+    });
+  }
+
+  if (req.method !== "POST") {
+    return jsonResponse(
+      {
+        success: false,
+        error: "Only POST requests are allowed.",
+      },
+      405
+    );
+  }
+
+  try {
+    /*
+     * READ SUPABASE AND DARAJA SECRETS
+     */
+
+    const consumerKey = Deno.env.get("MPESA_CONSUMER_KEY");
+    const consumerSecret = Deno.env.get("MPESA_CONSUMER_SECRET");
+    const defaultShortCode = Deno.env.get("MPESA_SHORTCODE");
+    const defaultPasskey = Deno.env.get("MPESA_PASSKEY");
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get(
+      "SUPABASE_SERVICE_ROLE_KEY"
+    );
+
+    if (
+      !consumerKey ||
+      !consumerSecret ||
+      !defaultShortCode ||
+      !defaultPasskey
+    ) {
+      throw new Error(
+        "M-Pesa configuration is incomplete. Please check the Supabase M-Pesa secrets."
+      );
+    }
+
+    if (!supabaseUrl || !serviceRoleKey) {
+      throw new Error(
+        "Supabase server configuration is incomplete."
+      );
+    }
+
+    /*
+     * CREATE PRIVILEGED SERVER-SIDE CLIENT
+     *
+     * This client uses the service-role key.
+     * Never expose that key to the frontend.
+     */
+
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      serviceRoleKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+
+    /*
+     * AUTHENTICATE THE CALLER
+     *
+     * verify_jwt is disabled for this function, so we
+     * validate the supplied access token explicitly.
+     */
+
+    const authorization = req.headers.get("Authorization");
+    const tokenMatch = authorization?.match(/^Bearer\s+(.+)$/i);
+    const accessToken = tokenMatch?.[1];
+
+    if (!accessToken) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "Authentication required. Please sign in again.",
+        },
+        401
+      );
+    }
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(accessToken);
+
+    if (authError || !user) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "Your session is invalid or expired. Please sign in again.",
+        },
+        401
+      );
+    }
+
+    /*
+     * READ REQUEST BODY
+     */
+
+    const body = await req.json();
+
+    const {
+      phoneNumber,
+      amount,
+      businessId,
+      saleNumber,
+      customerId,
+      items,
+      taxAmount = 0,
+      discountAmount = 0,
+      notes = null,
+    } = body;
+
+    /*
+     * VALIDATE BASIC SALE INFORMATION
+     */
+
+    if (
+      businessId === undefined ||
+      businessId === null ||
+      businessId === ""
+    ) {
+      throw new Error("Business ID is required.");
+    }
+
+    if (
+      typeof saleNumber !== "string" ||
+      !saleNumber.trim()
+    ) {
+      throw new Error("Sale number is required.");
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error(
+        "The sale must contain at least one product."
+      );
+    }
+
+    const numericBusinessId = Number(businessId);
+
+    if (
+      !Number.isSafeInteger(numericBusinessId) ||
+      numericBusinessId <= 0
+    ) {
+      throw new Error("Invalid business ID.");
+    }
+
+    /*
+     * VERIFY ACTIVE PROFILE AND BUSINESS OWNERSHIP
+     *
+     * The business ID supplied by the browser is not
+     * trusted until it matches the authenticated user's
+     * active profile.
+     */
+
+    const {
+      data: profile,
+      error: profileError,
+    } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id, business_id, is_active, role")
+      .eq("id", user.id)
+      .eq("business_id", numericBusinessId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error(
+        "Failed to verify the user's business profile:",
+        profileError
+      );
+
+      throw new Error(
+        "Could not verify your business access. Please try again."
+      );
+    }
+
+    if (!profile) {
+      return jsonResponse(
+        {
+          success: false,
+          error:
+            "You are not authorized to initiate payments for this business.",
+        },
+        403
+      );
+    }
+
+    /*
+     * GET THIS BUSINESS'S M-PESA SETTINGS
+     */
+
+    const {
+      data: business,
+      error: businessError,
+    } = await supabaseAdmin
+      .from("businesses")
+      .select(
+        "id, name, mpesa_enabled, mpesa_merchant_type, mpesa_merchant_number, mpesa_environment"
+      )
+      .eq("id", numericBusinessId)
+      .maybeSingle();
+
+    if (businessError) {
+      console.error(
+        "Failed to load business M-Pesa settings:",
+        businessError
+      );
+
+      throw new Error(
+        "Could not load this business's M-Pesa settings."
+      );
+    }
+
+    if (!business) {
+      throw new Error(
+        "The business connected to this sale could not be found."
+      );
+    }
+
+    if (!business.mpesa_enabled) {
+      throw new Error(
+        "M-Pesa payments are not enabled for this business."
+      );
+    }
+
+    if (!business.mpesa_merchant_number) {
+      throw new Error(
+        "This business has not entered an M-Pesa merchant number in Settings."
+      );
+    }
+
+    /*
+     * CURRENT DARAJA CONFIGURATION
+     *
+     * Keep the existing sandbox configuration.
+     * Production configuration is not enabled here.
+     */
+
+    const merchantNumber = String(
+      business.mpesa_merchant_number
+    ).trim();
+
+    const merchantType = String(
+      business.mpesa_merchant_type || "paybill"
+    ).toLowerCase();
+
+    const environment = String(
+      business.mpesa_environment || "sandbox"
+    ).toLowerCase();
+
+    if (environment !== "sandbox") {
+      throw new Error(
+        "Production M-Pesa has not been enabled yet. Please keep this business on Sandbox while we complete testing."
+      );
+    }
+
+    if (!/^\d+$/.test(merchantNumber)) {
+      throw new Error(
+        "The M-Pesa merchant number must contain numbers only."
+      );
+    }
+
+    if (
+      merchantType !== "paybill" &&
+      merchantType !== "till"
+    ) {
+      throw new Error(
+        "Invalid M-Pesa merchant account type."
+      );
+    }
+
+    if (merchantType !== "paybill") {
+      throw new Error(
+        "Till payments will be enabled after the PayBill sandbox flow is confirmed."
+      );
+    }
+
+    /*
+     * VALIDATE AMOUNT
+     */
+
+    const numericAmount = Number(amount);
+
+    if (
+      !Number.isFinite(numericAmount) ||
+      numericAmount <= 0
+    ) {
+      throw new Error(
+        "Payment amount must be greater than zero."
+      );
+    }
+
+    /*
+     * NORMALIZE PHONE NUMBER
+     */
+
+    const normalizedPhone =
+      normalizePhoneNumber(phoneNumber);
+
+    const shortCode = merchantNumber;
+
+    /*
+     * CREATE DARAJA TIMESTAMP
+     */
+
+    const timestamp = getTimestamp();
+
+    /*
+     * GENERATE DARAJA PASSWORD
+     */
+
+    const password = base64Encode(
+      `${shortCode}${defaultPasskey}${timestamp}`
+    );
+
+    /*
+     * GET DARAJA OAUTH ACCESS TOKEN
+     */
+
+    const basicAuth = base64Encode(
+      `${consumerKey}:${consumerSecret}`
+    );
+
+    const tokenResponse = await fetch(
+      "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
+        },
+      }
+    );
+
+    const tokenData = await tokenResponse.json();
+
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.error("Daraja OAuth request failed.");
+
+      throw new Error(
+        tokenData.errorMessage ||
+          tokenData.error_description ||
+          "Failed to obtain M-Pesa access token."
+      );
+    }
+
+    const darajaAccessToken = tokenData.access_token;
+
+    /*
+     * SEND STK PUSH
+     */
+
+    const stkPayload = {
+      BusinessShortCode: Number(shortCode),
+      Password: password,
+      Timestamp: timestamp,
+      TransactionType: "CustomerPayBillOnline",
+      Amount: Math.round(numericAmount),
+      PartyA: normalizedPhone,
+      PartyB: Number(shortCode),
+      PhoneNumber: normalizedPhone,
+      CallBackURL:
+        "https://ejconenpabtyfloyjubi.supabase.co/functions/v1/mpesa-callback",
+      AccountReference: saleNumber,
+      TransactionDesc: "JESTA POS Payment",
+    };
+
+    console.log("Sending M-Pesa STK Push:", {
+      businessId: numericBusinessId,
+      userId: user.id,
+      businessName: business.name,
+      merchantType,
+      merchantNumber: shortCode,
+      amount: stkPayload.Amount,
+      saleNumber,
+      Password: "[REDACTED]",
+    });
+
+    const stkResponse = await fetch(
+      "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${darajaAccessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(stkPayload),
+      }
+    );
+
+    const stkData = await stkResponse.json();
+
+    if (
+      !stkResponse.ok ||
+      String(stkData.ResponseCode) !== "0"
+    ) {
+      console.error("Daraja rejected the STK Push request.");
+
+      throw new Error(
+        stkData.errorMessage ||
+          stkData.ResponseDescription ||
+          "M-Pesa STK Push was rejected."
+      );
+    }
+
+    const checkoutRequestId = stkData.CheckoutRequestID;
+    const merchantRequestId = stkData.MerchantRequestID;
+
+    if (!checkoutRequestId) {
+      throw new Error(
+        "M-Pesa did not return a CheckoutRequestID."
+      );
+    }
+
+    /*
+     * SAVE PENDING M-PESA TRANSACTION
+     *
+     * This retains the existing database insert and
+     * response shape expected by Sales.jsx.
+     */
+
+    const {
+      data: transaction,
+      error: transactionError,
+    } = await supabaseAdmin
+      .from("mpesa_transactions")
+      .insert({
+        business_id: numericBusinessId,
+        sale_number: String(saleNumber),
+        customer_id:
+          customerId === null ||
+          customerId === undefined ||
+          customerId === ""
+            ? null
+            : Number(customerId),
+        items,
+        amount: numericAmount,
+        phone_number: normalizedPhone,
+        merchant_request_id: merchantRequestId || null,
+        checkout_request_id: checkoutRequestId,
+        tax_amount: Number(taxAmount) || 0,
+        discount_amount: Number(discountAmount) || 0,
+        notes,
+        result_code: null,
+        result_description:
+          stkData.ResponseDescription || "STK Push accepted.",
+        status: "PENDING",
+      })
+      .select("*")
+      .single();
+
+    if (transactionError) {
+      console.error(
+        "Failed to save pending M-Pesa transaction:",
+        transactionError
+      );
+
+      throw new Error(
+        "M-Pesa request was accepted, but JESTA could not save the pending transaction. Do not send another prompt until the transaction has been checked."
+      );
+    }
+
+    console.log("Pending M-Pesa transaction saved:", {
+      id: transaction.id,
+      checkoutRequestId,
+      saleNumber,
+      businessId: numericBusinessId,
+    });
+
+    /*
+     * RETURN SUCCESS TO JESTA FRONTEND
+     */
+
+    return jsonResponse({
+      success: true,
+      data: stkData,
+      transaction: {
+        id: transaction.id,
+        checkoutRequestId,
+        merchantRequestId,
+        saleNumber,
+        amount: numericAmount,
+        phoneNumber: normalizedPhone,
+        status: "PENDING",
+      },
+    });
+  } catch (error) {
+    console.error(
+      "M-Pesa STK Push error:",
+      error instanceof Error ? error.message : "Unknown error"
+    );
+
+    return jsonResponse(
+      {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to initiate M-Pesa payment.",
+      },
+      400
+    );
+  }
+});

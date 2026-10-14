@@ -1,3 +1,4 @@
+
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -10,111 +11,88 @@ const corsHeaders = {
 const jsonResponse = (
   body: Record<string, unknown>,
   status = 200
-) => {
-  return new Response(JSON.stringify(body), {
+) =>
+  new Response(JSON.stringify(body), {
     status,
     headers: {
       ...corsHeaders,
       "Content-Type": "application/json",
     },
   });
-};
 
-/*
- * Safaricom sends TransactionDate in this format:
- *
- * YYYYMMDDHHMMSS
- *
- * Example:
- * 20261006183031
- *
- * We convert it to an ISO timestamp using Kenya time.
- */
-const parseTransactionDate = (
-  transactionDate: unknown
-) => {
-  const value = String(
-    transactionDate || ""
-  ).trim();
+const parseTransactionDate = (value: unknown): string | null => {
+  const input = String(value ?? "").trim();
 
-  if (!/^\d{14}$/.test(value)) {
+  if (!/^\d{14}$/.test(input)) return null;
+
+  const year = Number(input.slice(0, 4));
+  const month = Number(input.slice(4, 6));
+  const day = Number(input.slice(6, 8));
+  const hour = Number(input.slice(8, 10));
+  const minute = Number(input.slice(10, 12));
+  const second = Number(input.slice(12, 14));
+
+  const date = new Date(
+    `${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}T${input.slice(8, 10)}:${input.slice(10, 12)}:${input.slice(12, 14)}+03:00`
+  );
+
+  if (
+    !Number.isFinite(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() + 1 !== month ||
+    date.getUTCDate() !== day ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
     return null;
   }
 
-  const year = value.substring(0, 4);
-  const month = value.substring(4, 6);
-  const day = value.substring(6, 8);
-  const hour = value.substring(8, 10);
-  const minute = value.substring(10, 12);
-  const second = value.substring(12, 14);
-
-  return `${year}-${month}-${day}T${hour}:${minute}:${second}+03:00`;
+  return date.toISOString();
 };
 
-/*
- * Extract one item from Safaricom CallbackMetadata.
- */
 const getCallbackItem = (
-  items: any[],
+  items: unknown,
   name: string
-) => {
+): unknown => {
+  if (!Array.isArray(items)) return null;
+
   const item = items.find(
-    (entry) => entry?.Name === name
+    (entry: unknown) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as Record<string, unknown>).Name === name
   );
 
-  return item?.Value ?? null;
+  return item && typeof item === "object"
+    ? (item as Record<string, unknown>).Value ?? null
+    : null;
 };
 
 Deno.serve(async (req) => {
-  /*
-   * ---------------------------------------------------------
-   * CORS
-   * ---------------------------------------------------------
-   */
-
   if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: corsHeaders,
-    });
+    return new Response("ok", { headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
     return jsonResponse(
-      {
-        success: false,
-        error: "Only POST requests are allowed.",
-      },
+      { success: false, error: "Only POST requests are allowed." },
       405
     );
   }
 
   try {
-    /*
-     * ---------------------------------------------------------
-     * SUPABASE SERVER CONFIGURATION
-     * ---------------------------------------------------------
-     */
-
-    const supabaseUrl =
-      Deno.env.get("SUPABASE_URL");
-
-    const serviceRoleKey =
-      Deno.env.get(
-        "SUPABASE_SERVICE_ROLE_KEY"
-      );
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!supabaseUrl || !serviceRoleKey) {
-      throw new Error(
-        "Supabase server configuration is missing."
+      console.error("Supabase server configuration is missing.");
+
+      return jsonResponse(
+        { success: false, error: "Server configuration error." },
+        500
       );
     }
-
-    /*
-     * Create a server-side Supabase client.
-     *
-     * The callback comes from Safaricom, not from a
-     * logged-in browser user, so we use the service role.
-     */
 
     const supabaseAdmin = createClient(
       supabaseUrl,
@@ -127,598 +105,285 @@ Deno.serve(async (req) => {
       }
     );
 
-    /*
-     * ---------------------------------------------------------
-     * READ SAFARICOM CALLBACK
-     * ---------------------------------------------------------
-     */
-
     const callbackBody = await req.json();
+    const stkCallback = callbackBody?.Body?.stkCallback;
 
-    console.log(
-      "M-Pesa callback received:",
-      JSON.stringify(callbackBody)
-    );
-
-    const stkCallback =
-      callbackBody?.Body?.stkCallback;
-
-    if (!stkCallback) {
-      console.error(
-        "Invalid M-Pesa callback payload."
+    if (!stkCallback || typeof stkCallback !== "object") {
+      return jsonResponse(
+        { success: false, error: "Invalid M-Pesa callback payload." },
+        400
       );
-
-      return jsonResponse({
-        success: false,
-        error:
-          "Invalid M-Pesa callback payload.",
-      });
     }
 
-    /*
-     * ---------------------------------------------------------
-     * BASIC CALLBACK INFORMATION
-     * ---------------------------------------------------------
-     */
+    const checkoutRequestId = String(
+      stkCallback.CheckoutRequestID ?? ""
+    ).trim();
 
-    const merchantRequestId =
-      stkCallback.MerchantRequestID || null;
+    const merchantRequestId = String(
+      stkCallback.MerchantRequestID ?? ""
+    ).trim();
 
-    const checkoutRequestId =
-      stkCallback.CheckoutRequestID || null;
-
-    const resultCode = Number(
-      stkCallback.ResultCode
+    const resultCode = stkCallback.ResultCode;
+    const resultDescription = String(
+      stkCallback.ResultDesc ?? "No result description provided."
     );
 
-    const resultDescription =
-      stkCallback.ResultDesc ||
-      "No result description provided.";
-
-    if (!checkoutRequestId) {
-      console.error(
-        "Callback did not contain CheckoutRequestID."
+    if (
+      !checkoutRequestId ||
+      !Number.isInteger(resultCode) ||
+      typeof resultCode !== "number"
+    ) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "Invalid checkout ID or result code.",
+        },
+        400
       );
-
-      return jsonResponse({
-        success: false,
-        error:
-          "CheckoutRequestID is missing.",
-      });
     }
 
-    /*
-     * ---------------------------------------------------------
-     * FIND THE PENDING JESTA TRANSACTION
-     * ---------------------------------------------------------
-     *
-     * The STK Push function saved the CheckoutRequestID
-     * before returning to the JESTA frontend.
-     */
-
-    let transaction = null;
-
-    let transactionError = null;
-
-    /*
-     * First try CheckoutRequestID.
-     */
-
-    const checkoutResult =
+    // Find the exact checkout. Do not fall back to a different
+    // transaction using only the merchant request ID.
+    const { data: transaction, error: lookupError } =
       await supabaseAdmin
         .from("mpesa_transactions")
         .select("*")
-        .eq(
-          "checkout_request_id",
-          checkoutRequestId
-        )
+        .eq("checkout_request_id", checkoutRequestId)
         .maybeSingle();
 
-    transaction =
-      checkoutResult.data;
+    if (lookupError) {
+      console.error("M-Pesa transaction lookup failed:", lookupError.message);
 
-    transactionError =
-      checkoutResult.error;
-
-    /*
-     * If it wasn't found, try MerchantRequestID
-     * as a fallback.
-     */
-
-    if (
-      !transaction &&
-      merchantRequestId
-    ) {
-      const merchantResult =
-        await supabaseAdmin
-          .from("mpesa_transactions")
-          .select("*")
-          .eq(
-            "merchant_request_id",
-            merchantRequestId
-          )
-          .maybeSingle();
-
-      if (merchantResult.data) {
-        transaction =
-          merchantResult.data;
-        transactionError =
-          merchantResult.error;
-      }
-    }
-
-    if (transactionError) {
-      console.error(
-        "Error finding M-Pesa transaction:",
-        transactionError
+      return jsonResponse(
+        { success: false, error: "Could not look up the transaction." },
+        500
       );
-
-      throw transactionError;
     }
 
     if (!transaction) {
-      /*
-       * We acknowledge the callback but do not create
-       * a sale because we don't know which JESTA sale
-       * this payment belongs to.
-       */
-
-      console.error(
-        "No matching JESTA M-Pesa transaction found:",
-        checkoutRequestId
-      );
+      // A callback can arrive before the STK function has saved the
+      // checkout ID. Acknowledge receipt without creating a sale.
+      console.error("No matching transaction for checkout:", checkoutRequestId);
 
       return jsonResponse({
         success: false,
-        error:
-          "No matching JESTA M-Pesa transaction found.",
+        error: "Transaction not found. Reconciliation is required.",
         checkoutRequestId,
       });
     }
 
-    console.log(
-      "Matched JESTA M-Pesa transaction:",
-      {
-        id: transaction.id,
-        saleNumber:
-          transaction.sale_number,
-        checkoutRequestId,
-        status: transaction.status,
-      }
-    );
-
-    /*
-     * ---------------------------------------------------------
-     * IDEMPOTENCY CHECK
-     * ---------------------------------------------------------
-     *
-     * Safaricom callbacks should not cause the same sale
-     * to be completed twice.
-     */
-
-    if (
-      transaction.status === "SUCCESS" &&
-      transaction.sale_id
-    ) {
-      console.log(
-        "Transaction already completed:",
-        transaction.id
-      );
-
+    // Fast path for a callback already processed successfully.
+    // The database RPC below independently enforces this under a lock.
+    if (transaction.status === "SUCCESS" && transaction.sale_id) {
       return jsonResponse({
         success: true,
-        message:
-          "M-Pesa transaction was already processed.",
-        transactionId:
-          transaction.id,
-        saleId:
-          transaction.sale_id,
+        status: "SUCCESS",
+        message: "Transaction already processed.",
+        transactionId: transaction.id,
+        saleId: transaction.sale_id,
+        checkoutRequestId,
       });
     }
 
-    /*
-     * ---------------------------------------------------------
-     * PAYMENT FAILED / CANCELLED
-     * ---------------------------------------------------------
-     *
-     * ResultCode 0 = successful M-Pesa payment.
-     *
-     * Anything else means the customer did not
-     * successfully complete the payment.
-     */
-
+    // A non-zero Daraja result means the STK request failed or was
+    // cancelled. Never let a later failure callback overwrite SUCCESS.
     if (resultCode !== 0) {
-      const { error: updateError } =
-        await supabaseAdmin
-          .from("mpesa_transactions")
-          .update({
-            merchant_request_id:
-              merchantRequestId ||
-              transaction.merchant_request_id,
-            result_code: resultCode,
-            result_description:
-              resultDescription,
-            status: "FAILED",
-            updated_at: new Date().toISOString(),
-          })
-          .eq(
-            "id",
-            transaction.id
-          );
+      const { error: updateError } = await supabaseAdmin
+        .from("mpesa_transactions")
+        .update({
+          merchant_request_id:
+            merchantRequestId || transaction.merchant_request_id,
+          result_code: resultCode,
+          result_description: resultDescription,
+          status: "FAILED",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", transaction.id)
+        .neq("status", "SUCCESS");
 
       if (updateError) {
-        console.error(
-          "Failed to update failed M-Pesa transaction:",
-          updateError
+        console.error("Failed to record failed payment:", updateError.message);
+
+        return jsonResponse(
+          { success: false, error: "Could not record payment failure." },
+          500
         );
       }
-
-      console.log(
-        "M-Pesa payment failed:",
-        {
-          transactionId:
-            transaction.id,
-          resultCode,
-          resultDescription,
-        }
-      );
-
-      /*
-       * Return 200 so Safaricom knows the callback
-       * was received successfully.
-       */
 
       return jsonResponse({
         success: true,
         status: "FAILED",
-        transactionId:
-          transaction.id,
+        transactionId: transaction.id,
         checkoutRequestId,
         resultCode,
         resultDescription,
       });
     }
 
-    /*
-     * ---------------------------------------------------------
-     * SUCCESSFUL PAYMENT
-     * ---------------------------------------------------------
-     */
+    // Successful callbacks must contain the actual payment amount and
+    // receipt. Never substitute transaction.amount for missing metadata.
+    const metadata = stkCallback.CallbackMetadata?.Item;
 
-    const callbackMetadata =
-      stkCallback.CallbackMetadata?.Item ||
-      [];
+    const amountValue = getCallbackItem(metadata, "Amount");
+    const receiptValue = getCallbackItem(metadata, "MpesaReceiptNumber");
+    const phoneValue = getCallbackItem(metadata, "PhoneNumber");
+    const dateValue = getCallbackItem(metadata, "TransactionDate");
 
-    const amountFromCallback =
-      getCallbackItem(
-        callbackMetadata,
-        "Amount"
-      );
+    const paidAmount =
+      typeof amountValue === "number" ||
+      typeof amountValue === "string"
+        ? Number(amountValue)
+        : NaN;
 
-    const mpesaReceiptNumber =
-      getCallbackItem(
-        callbackMetadata,
-        "MpesaReceiptNumber"
-      );
-
-    const transactionDate =
-      getCallbackItem(
-        callbackMetadata,
-        "TransactionDate"
-      );
+    const receipt =
+      typeof receiptValue === "string"
+        ? receiptValue.trim()
+        : "";
 
     const phoneNumber =
-      getCallbackItem(
-        callbackMetadata,
-        "PhoneNumber"
-      );
+      typeof phoneValue === "number" ||
+      typeof phoneValue === "string"
+        ? String(phoneValue)
+        : null;
 
-    const paidAmount = Number(
-      amountFromCallback ??
-        transaction.amount
-    );
-
-    /*
-     * ---------------------------------------------------------
-     * VERIFY PAYMENT AMOUNT
-     * ---------------------------------------------------------
-     *
-     * The amount received from Safaricom must match
-     * the amount JESTA expected.
-     */
-
-    const expectedAmount = Number(
-      transaction.amount
-    );
+    const transactionDate = parseTransactionDate(dateValue);
 
     if (
       !Number.isFinite(paidAmount) ||
-      paidAmount <= 0
+      paidAmount <= 0 ||
+      !receipt
     ) {
-      throw new Error(
-        "M-Pesa callback did not contain a valid payment amount."
-      );
-    }
-
-    if (
-      Math.abs(
-        paidAmount - expectedAmount
-      ) > 0.01
-    ) {
+      // Do not create a sale or mark the payment successful.
+      // Verify this transaction separately with Daraja before resolving it.
       console.error(
-        "M-Pesa amount mismatch:",
+        "Successful callback missing valid amount or receipt:",
         {
-          expectedAmount,
-          paidAmount,
-          transactionId:
-            transaction.id,
+          transactionId: transaction.id,
+          checkoutRequestId,
+          hasAmount: Number.isFinite(paidAmount),
+          hasReceipt: Boolean(receipt),
         }
       );
 
-      await supabaseAdmin
+      return jsonResponse({
+        success: false,
+        status: "PROCESSING_ERROR",
+        error: "Required payment metadata is missing. Verification is required.",
+        transactionId: transaction.id,
+      });
+    }
+
+    if (
+      !Number.isSafeInteger(paidAmount) ||
+      paidAmount !== Number(transaction.amount)
+    ) {
+      console.error("M-Pesa payment amount mismatch:", {
+        transactionId: transaction.id,
+        checkoutRequestId,
+        expectedAmount: transaction.amount,
+        receivedAmount: paidAmount,
+      });
+
+      const { error: updateError } = await supabaseAdmin
         .from("mpesa_transactions")
         .update({
           result_code: resultCode,
-          result_description:
-            `Amount mismatch. Expected ${expectedAmount}, received ${paidAmount}.`,
-          status:
-            "PROCESSING_ERROR",
-          updated_at:
-            new Date().toISOString(),
+          result_description: "Payment amount mismatch; verification required.",
+          status: "PROCESSING_ERROR",
+          mpesa_receipt_number: receipt,
+          phone_number: phoneNumber ?? transaction.phone_number,
+          transaction_date: transactionDate,
+          updated_at: new Date().toISOString(),
         })
-        .eq(
-          "id",
-          transaction.id
-        );
+        .eq("id", transaction.id)
+        .neq("status", "SUCCESS");
+
+      if (updateError) {
+        console.error("Failed to record amount mismatch:", updateError.message);
+      }
 
       return jsonResponse({
         success: false,
-        error:
-          "M-Pesa payment amount does not match the expected sale amount.",
+        status: "PROCESSING_ERROR",
+        error: "Payment amount mismatch. Verification is required.",
+        transactionId: transaction.id,
       });
     }
 
-    /*
-     * ---------------------------------------------------------
-     * COMPLETE THE JESTA SALE
-     * ---------------------------------------------------------
-     *
-     * THIS is the important point.
-     *
-     * We do NOT call complete_sale when the STK Push
-     * is first sent.
-     *
-     * We call it ONLY after Safaricom confirms
-     * successful payment.
-     */
-
-    const {
-      data: saleResult,
-      error: saleError,
-    } = await supabaseAdmin.rpc(
-      "complete_sale",
-      {
-        p_business_id:
-          transaction.business_id,
-
-        p_customer_id:
-          transaction.customer_id ||
-          null,
-
-        p_sale_number:
-          transaction.sale_number,
-
-        p_items:
-          transaction.items,
-
-        p_amount_paid:
-          paidAmount,
-
-        p_payment_method:
-          "mpesa",
-
-        p_transaction_reference:
-          mpesaReceiptNumber ||
-          checkoutRequestId,
-
-        p_tax_amount:
-          Number(
-            transaction.tax_amount || 0
-          ),
-
-        p_discount_amount:
-          Number(
-            transaction.discount_amount || 0
-          ),
-
-        p_notes:
-          transaction.notes ||
-          null,
-      }
-    );
-
-    if (saleError) {
-      console.error(
-        "Failed to complete JESTA sale after M-Pesa payment:",
-        saleError
-      );
-
-      /*
-       * The customer has already paid.
-       *
-       * Therefore we do NOT mark this simply as FAILED.
-       * We use PROCESSING_ERROR so the system knows
-       * payment succeeded but sale creation needs attention.
-       */
-
-      await supabaseAdmin
-        .from("mpesa_transactions")
-        .update({
-          result_code: resultCode,
-          result_description:
-            `Payment received, but JESTA sale creation failed: ${saleError.message}`,
-          status:
-            "PROCESSING_ERROR",
-          mpesa_receipt_number:
-            mpesaReceiptNumber ||
-            null,
-          phone_number:
-            phoneNumber
-              ? String(phoneNumber)
-              : transaction.phone_number,
-          transaction_date:
-            parseTransactionDate(
-              transactionDate
-            ),
-          updated_at:
-            new Date().toISOString(),
-        })
-        .eq(
-          "id",
-          transaction.id
-        );
-
-      return jsonResponse({
-        success: false,
-        status:
-          "PROCESSING_ERROR",
-        error:
-          "Payment was received, but JESTA could not complete the sale.",
-        transactionId:
-          transaction.id,
+    // This RPC locks the transaction, validates its state and amount,
+    // creates the sale, and updates the M-Pesa transaction atomically.
+    // Repeated callbacks return the original sale rather than creating
+    // a second one.
+    const { data: result, error: processingError } =
+      await supabaseAdmin.rpc("process_mpesa_success_callback", {
+        p_transaction_id: transaction.id,
+        p_checkout_request_id: checkoutRequestId,
+        p_merchant_request_id: merchantRequestId || null,
+        p_result_code: resultCode,
+        p_result_description: resultDescription,
+        p_paid_amount: paidAmount,
+        p_mpesa_receipt_number: receipt,
+        p_phone_number: phoneNumber,
+        p_transaction_date: transactionDate,
       });
+
+    if (processingError) {
+      console.error("Atomic M-Pesa processing failed:", {
+        transactionId: transaction.id,
+        checkoutRequestId,
+        error: processingError.message,
+      });
+
+      // The RPC rolls back its sale and status changes together if it
+      // raises an error. Do not independently create or retry the sale here.
+      return jsonResponse(
+        {
+          success: false,
+          status: "PROCESSING_ERROR",
+          error: "Payment processing requires verification or reconciliation.",
+          transactionId: transaction.id,
+        },
+        500
+      );
     }
 
-    /*
-     * ---------------------------------------------------------
-     * GET THE SALE ID
-     * ---------------------------------------------------------
-     */
-
-    const saleId =
-      typeof saleResult === "object" &&
-      saleResult !== null
-        ? saleResult.id ||
-          saleResult.sale_id ||
-          null
-        : saleResult;
-
-    /*
-     * ---------------------------------------------------------
-     * UPDATE M-PESA TRANSACTION
-     * ---------------------------------------------------------
-     */
-
-    const {
-      error: finalUpdateError,
-    } = await supabaseAdmin
-      .from("mpesa_transactions")
-      .update({
-        merchant_request_id:
-          merchantRequestId ||
-          transaction.merchant_request_id,
-
-        result_code:
-          resultCode,
-
-        result_description:
-          resultDescription,
-
-        mpesa_receipt_number:
-          mpesaReceiptNumber ||
-          null,
-
-        phone_number:
-          phoneNumber
-            ? String(phoneNumber)
-            : transaction.phone_number,
-
-        transaction_date:
-          parseTransactionDate(
-            transactionDate
-          ),
-
-        sale_id:
-          saleId,
-
-        status:
-          "SUCCESS",
-
-        updated_at:
-          new Date().toISOString(),
-      })
-      .eq(
-        "id",
-        transaction.id
-      );
-
-    if (finalUpdateError) {
-      console.error(
-        "Sale completed but M-Pesa transaction update failed:",
-        finalUpdateError
-      );
-
-      /*
-       * The sale itself has already been completed.
-       *
-       * We don't attempt complete_sale again because
-       * doing so could create a duplicate sale.
-       */
-
-      return jsonResponse({
-        success: true,
-        warning:
-          "Payment and sale were completed, but the M-Pesa transaction record could not be fully updated.",
-        transactionId:
-          transaction.id,
-        saleId,
+    if (!result || result.success !== true || !result.sale_id) {
+      console.error("Atomic M-Pesa RPC returned an unexpected result:", {
+        transactionId: transaction.id,
       });
+
+      return jsonResponse(
+        {
+          success: false,
+          status: "PROCESSING_ERROR",
+          error: "Unexpected payment processing result.",
+          transactionId: transaction.id,
+        },
+        500
+      );
     }
-
-    /*
-     * ---------------------------------------------------------
-     * SUCCESS
-     * ---------------------------------------------------------
-     */
-
-    console.log(
-      "M-Pesa payment and JESTA sale completed successfully:",
-      {
-        transactionId:
-          transaction.id,
-        saleId,
-        saleNumber:
-          transaction.sale_number,
-        mpesaReceiptNumber,
-        paidAmount,
-      }
-    );
 
     return jsonResponse({
       success: true,
       status: "SUCCESS",
-      transactionId:
-        transaction.id,
-      saleId,
-      saleNumber:
-        transaction.sale_number,
-      mpesaReceiptNumber,
-      amount: paidAmount,
+      transactionId: result.transaction_id,
+      saleId: result.sale_id,
+      saleNumber: result.sale_number ?? transaction.sale_number,
+      mpesaReceiptNumber: result.mpesa_receipt_number ?? receipt,
+      amount: result.amount ?? paidAmount,
       checkoutRequestId,
+      alreadyProcessed: result.already_processed === true,
     });
   } catch (error) {
     console.error(
       "M-Pesa callback processing error:",
-      error
+      error instanceof Error ? error.message : "Unknown error"
     );
 
     return jsonResponse(
       {
         success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to process M-Pesa callback.",
+        error: "M-Pesa callback processing failed.",
       },
       500
     );

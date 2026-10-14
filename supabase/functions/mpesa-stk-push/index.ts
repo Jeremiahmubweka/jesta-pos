@@ -1,3 +1,4 @@
+
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -47,30 +48,37 @@ const normalizePhoneNumber = (phoneNumber: string) => {
 };
 
 const getTimestamp = () => {
-  const now = new Date();
+  // Daraja expects the timestamp in East Africa Time.
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Nairobi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
 
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  const hours = String(now.getHours()).padStart(2, "0");
-  const minutes = String(now.getMinutes()).padStart(2, "0");
-  const seconds = String(now.getSeconds()).padStart(2, "0");
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value])
+  );
 
-  return `${year}${month}${day}${hours}${minutes}${seconds}`;
+  return (
+    values.year +
+    values.month +
+    values.day +
+    values.hour +
+    values.minute +
+    values.second
+  );
 };
 
-const base64Encode = (value: string) => {
-  return btoa(value);
-};
+const base64Encode = (value: string) => btoa(value);
 
 Deno.serve(async (req) => {
-  /*
-   * Handle browser CORS preflight requests.
-   */
   if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: corsHeaders,
-    });
+    return new Response("ok", { headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
@@ -85,16 +93,13 @@ Deno.serve(async (req) => {
 
   try {
     /*
-     * ---------------------------------------------------------
-     * READ SUPABASE SECRETS
-     * ---------------------------------------------------------
+     * 1. READ SERVER SECRETS
      */
 
     const consumerKey = Deno.env.get("MPESA_CONSUMER_KEY");
     const consumerSecret = Deno.env.get("MPESA_CONSUMER_SECRET");
     const defaultShortCode = Deno.env.get("MPESA_SHORTCODE");
     const defaultPasskey = Deno.env.get("MPESA_PASSKEY");
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get(
       "SUPABASE_SERVICE_ROLE_KEY"
@@ -107,7 +112,7 @@ Deno.serve(async (req) => {
       !defaultPasskey
     ) {
       throw new Error(
-        "M-Pesa configuration is incomplete. Please check the Supabase M-Pesa secrets."
+        "M-Pesa configuration is incomplete. Check your Supabase M-Pesa secrets."
       );
     }
 
@@ -118,9 +123,7 @@ Deno.serve(async (req) => {
     }
 
     /*
-     * ---------------------------------------------------------
-     * CREATE SERVER-SIDE SUPABASE CLIENT
-     * ---------------------------------------------------------
+     * 2. CREATE SERVER-SIDE SUPABASE CLIENT
      */
 
     const supabaseAdmin = createClient(
@@ -135,9 +138,44 @@ Deno.serve(async (req) => {
     );
 
     /*
-     * ---------------------------------------------------------
-     * READ REQUEST BODY
-     * ---------------------------------------------------------
+     * 3. AUTHENTICATE THE CALLER
+     *
+     * JWT verification is disabled in the function
+     * configuration, so validate the access token here.
+     */
+
+    const authorization = req.headers.get("Authorization");
+    const tokenMatch = authorization?.match(/^Bearer\s+(.+)$/i);
+    const accessToken = tokenMatch?.[1];
+
+    if (!accessToken) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "Authentication required. Please sign in again.",
+        },
+        401
+      );
+    }
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(accessToken);
+
+    if (authError || !user) {
+      return jsonResponse(
+        {
+          success: false,
+          error:
+            "Your session is invalid or expired. Please sign in again.",
+        },
+        401
+      );
+    }
+
+    /*
+     * 4. READ REQUEST BODY
      */
 
     const body = await req.json();
@@ -155,17 +193,35 @@ Deno.serve(async (req) => {
     } = body;
 
     /*
-     * ---------------------------------------------------------
-     * VALIDATE BASIC SALE INFORMATION
-     * ---------------------------------------------------------
+     * 5. VALIDATE BASIC INPUT
      */
 
-    if (!businessId) {
+    if (
+      businessId === undefined ||
+      businessId === null ||
+      businessId === ""
+    ) {
       throw new Error("Business ID is required.");
     }
 
-    if (!saleNumber) {
+    const numericBusinessId = Number(businessId);
+
+    if (
+      !Number.isSafeInteger(numericBusinessId) ||
+      numericBusinessId <= 0
+    ) {
+      throw new Error("Invalid business ID.");
+    }
+
+    if (
+      typeof saleNumber !== "string" ||
+      !saleNumber.trim()
+    ) {
       throw new Error("Sale number is required.");
+    }
+
+    if (saleNumber.trim().length > 100) {
+      throw new Error("Sale number is too long.");
     }
 
     if (!Array.isArray(items) || items.length === 0) {
@@ -174,25 +230,48 @@ Deno.serve(async (req) => {
       );
     }
 
-    const numericBusinessId = Number(businessId);
-
-    if (
-      !Number.isInteger(numericBusinessId) ||
-      numericBusinessId <= 0
-    ) {
-      throw new Error("Invalid business ID.");
+    if (items.length > 200) {
+      throw new Error(
+        "Too many products in one transaction."
+      );
     }
 
     /*
-     * ---------------------------------------------------------
-     * GET THIS BUSINESS'S M-PESA SETTINGS
-     * ---------------------------------------------------------
-     *
-     * The merchant number is now taken from the business
-     * that is making this sale.
-     *
-     * This means different JESTA businesses can have
-     * different M-Pesa merchant numbers.
+     * 6. VERIFY ACTIVE USER AND BUSINESS ACCESS
+     */
+
+    const {
+      data: profile,
+      error: profileError,
+    } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id, business_id, is_active, role")
+      .eq("id", user.id)
+      .eq("business_id", numericBusinessId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error("Business profile verification failed.");
+
+      throw new Error(
+        "Could not verify your business access. Please try again."
+      );
+    }
+
+    if (!profile) {
+      return jsonResponse(
+        {
+          success: false,
+          error:
+            "You are not authorized to initiate payments for this business.",
+        },
+        403
+      );
+    }
+
+    /*
+     * 7. VERIFY BUSINESS M-PESA SETTINGS
      */
 
     const {
@@ -207,10 +286,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (businessError) {
-      console.error(
-        "Failed to load business M-Pesa settings:",
-        businessError
-      );
+      console.error("Failed to load business M-Pesa settings.");
 
       throw new Error(
         "Could not load this business's M-Pesa settings."
@@ -235,35 +311,21 @@ Deno.serve(async (req) => {
       );
     }
 
-    /*
-     * ---------------------------------------------------------
-     * CURRENT DARaja CONFIGURATION
-     * ---------------------------------------------------------
-     *
-     * For now we continue using the working sandbox Daraja
-     * credentials stored in Supabase secrets.
-     *
-     * The business-specific merchant number controls the
-     * destination of the payment.
-     */
-
     const merchantNumber = String(
       business.mpesa_merchant_number
     ).trim();
 
-    const merchantType =
-      String(
-        business.mpesa_merchant_type || "paybill"
-      ).toLowerCase();
+    const merchantType = String(
+      business.mpesa_merchant_type || "paybill"
+    ).toLowerCase();
 
-    const environment =
-      String(
-        business.mpesa_environment || "sandbox"
-      ).toLowerCase();
+    const environment = String(
+      business.mpesa_environment || "sandbox"
+    ).toLowerCase();
 
     if (environment !== "sandbox") {
       throw new Error(
-        "Production M-Pesa has not been enabled yet. Please keep this business on Sandbox while we complete testing."
+        "Production M-Pesa is not enabled in this function. Keep testing in Sandbox."
       );
     }
 
@@ -277,23 +339,8 @@ Deno.serve(async (req) => {
       merchantType !== "paybill" &&
       merchantType !== "till"
     ) {
-      throw new Error(
-        "Invalid M-Pesa merchant account type."
-      );
+      throw new Error("Invalid M-Pesa merchant account type.");
     }
-
-    /*
-     * IMPORTANT:
-     *
-     * The current working sandbox integration uses
-     * CustomerPayBillOnline.
-     *
-     * We are deliberately NOT changing the Daraja
-     * transaction type to Till yet. We will handle
-     * PayBill/Till production configuration separately
-     * after confirming the exact Daraja setup for each
-     * business.
-     */
 
     if (merchantType !== "paybill") {
       throw new Error(
@@ -302,72 +349,266 @@ Deno.serve(async (req) => {
     }
 
     /*
-     * ---------------------------------------------------------
-     * VALIDATE AMOUNT
-     * ---------------------------------------------------------
+     * 8. VALIDATE TAX AND DISCOUNT
      */
 
-    const numericAmount = Number(amount);
+    const numericTax = Number(taxAmount);
+    const numericDiscount = Number(discountAmount);
 
     if (
-      !Number.isFinite(numericAmount) ||
-      numericAmount <= 0
+      !Number.isFinite(numericTax) ||
+      numericTax < 0 ||
+      !Number.isFinite(numericDiscount) ||
+      numericDiscount < 0
+    ) {
+      throw new Error(
+        "Tax and discount must be valid, non-negative amounts."
+      );
+    }
+
+    /*
+     * 9. VALIDATE PRODUCT IDS AND QUANTITIES
+     *
+     * Never trust the product price or stock values
+     * submitted by the browser.
+     */
+
+    const requestedItems: {
+      product_id: number;
+      quantity: number;
+    }[] = [];
+
+    for (const item of items) {
+      if (!item || typeof item !== "object") {
+        throw new Error("Invalid product in the sale.");
+      }
+
+      const productId = Number(item.product_id);
+      const quantity = Number(item.quantity);
+
+      if (
+        !Number.isSafeInteger(productId) ||
+        productId <= 0
+      ) {
+        throw new Error("A product has an invalid ID.");
+      }
+
+      if (
+        !Number.isFinite(quantity) ||
+        quantity <= 0 ||
+        !Number.isSafeInteger(quantity * 100)
+      ) {
+        throw new Error(
+          "Product quantities must be positive and use no more than two decimal places."
+        );
+      }
+
+      requestedItems.push({
+        product_id: productId,
+        quantity,
+      });
+    }
+
+    /*
+     * 10. LOAD AUTHORITATIVE PRODUCT DATA
+     */
+
+    const productIds = [
+      ...new Set(
+        requestedItems.map((item) => item.product_id)
+      ),
+    ];
+
+    const {
+      data: products,
+      error: productsError,
+    } = await supabaseAdmin
+      .from("products")
+      .select(
+        "id, business_id, name, selling_price, stock_quantity, is_active"
+      )
+      .eq("business_id", numericBusinessId)
+      .in("id", productIds);
+
+    if (productsError) {
+      console.error("Product validation query failed.");
+
+      throw new Error(
+        "Could not verify sale products. Please try again."
+      );
+    }
+
+    const productMap = new Map(
+      (products || []).map((product) => [
+        Number(product.id),
+        product,
+      ])
+    );
+
+    /*
+     * 11. VALIDATE BUSINESS, ACTIVE STATUS, STOCK,
+     *     AND CALCULATE THE AUTHORITATIVE SUBTOTAL.
+     *
+     * Aggregate repeated product IDs before checking
+     * stock, so duplicate cart lines cannot bypass
+     * the quantity check.
+     */
+
+    const aggregatedQuantities = new Map<number, number>();
+
+    for (const item of requestedItems) {
+      const previous =
+        aggregatedQuantities.get(item.product_id) || 0;
+
+      aggregatedQuantities.set(
+        item.product_id,
+        previous + item.quantity
+      );
+    }
+
+    let subtotal = 0;
+
+    for (const [productId, quantity] of aggregatedQuantities) {
+      const product = productMap.get(productId);
+
+      if (!product || Number(product.business_id) !== numericBusinessId) {
+        throw new Error(
+          `Product ${productId} does not belong to this business.`
+        );
+      }
+
+      if (!product.is_active) {
+        throw new Error(
+          `${product.name} is inactive and cannot be sold.`
+        );
+      }
+
+      const sellingPrice = Number(product.selling_price);
+      const stockQuantity = Number(product.stock_quantity);
+
+      if (
+        !Number.isFinite(sellingPrice) ||
+        sellingPrice < 0 ||
+        !Number.isFinite(stockQuantity)
+      ) {
+        throw new Error(
+          `Invalid price or stock data for ${product.name}.`
+        );
+      }
+
+      if (stockQuantity < quantity) {
+        throw new Error(
+          `Insufficient stock for ${product.name}. Available: ${stockQuantity}; requested: ${quantity}.`
+        );
+      }
+
+      subtotal += sellingPrice * quantity;
+    }
+
+    /*
+     * 12. CALCULATE AND VERIFY THE PAYMENT AMOUNT
+     *
+     * Daraja STK Push accepts whole shillings.
+     * Save the same integer amount that we request.
+     */
+
+    const calculatedTotal =
+      subtotal + numericTax - numericDiscount;
+
+    if (
+      !Number.isFinite(calculatedTotal) ||
+      calculatedTotal <= 0
+    ) {
+      throw new Error(
+        "The calculated sale total must be greater than zero."
+      );
+    }
+
+    const paymentAmount = Math.round(calculatedTotal);
+    const requestedAmount = Number(amount);
+
+    if (
+      !Number.isFinite(requestedAmount) ||
+      requestedAmount <= 0
     ) {
       throw new Error(
         "Payment amount must be greater than zero."
       );
     }
 
+    if (Math.round(requestedAmount) !== paymentAmount) {
+      throw new Error(
+        "The payment amount does not match the current product prices. Refresh the sale and try again."
+      );
+    }
+
     /*
-     * ---------------------------------------------------------
-     * NORMALIZE PHONE NUMBER
-     * ---------------------------------------------------------
+     * 13. VERIFY CUSTOMER OWNERSHIP
+     */
+
+    let numericCustomerId: number | null = null;
+
+    if (
+      customerId !== null &&
+      customerId !== undefined &&
+      customerId !== ""
+    ) {
+      numericCustomerId = Number(customerId);
+
+      if (
+        !Number.isSafeInteger(numericCustomerId) ||
+        numericCustomerId <= 0
+      ) {
+        throw new Error("Invalid customer ID.");
+      }
+
+      const {
+        data: customer,
+        error: customerError,
+      } = await supabaseAdmin
+        .from("customers")
+        .select("id")
+        .eq("id", numericCustomerId)
+        .eq("business_id", numericBusinessId)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (customerError) {
+        console.error("Customer validation query failed.");
+
+        throw new Error(
+          "Could not verify the selected customer."
+        );
+      }
+
+      if (!customer) {
+        throw new Error(
+          "The selected customer is inactive or does not belong to this business."
+        );
+      }
+    }
+
+    /*
+     * 14. NORMALIZE PHONE NUMBER
      */
 
     const normalizedPhone =
       normalizePhoneNumber(phoneNumber);
 
-    /*
-     * ---------------------------------------------------------
-     * USE BUSINESS MERCHANT NUMBER
-     * ---------------------------------------------------------
-     */
-
     const shortCode = merchantNumber;
 
     /*
-     * ---------------------------------------------------------
-     * CREATE DARAJA TIMESTAMP
-     * ---------------------------------------------------------
+     * 15. GENERATE DARAJA TIMESTAMP AND PASSWORD
      */
 
     const timestamp = getTimestamp();
-
-    /*
-     * ---------------------------------------------------------
-     * GENERATE DARAJA PASSWORD
-     * ---------------------------------------------------------
-     *
-     * Password =
-     *
-     * Business Shortcode + Passkey + Timestamp
-     *
-     * encoded using Base64.
-     *
-     * IMPORTANT:
-     *
-     * The passkey is still kept securely in Supabase.
-     * It is never stored in the React frontend.
-     */
 
     const password = base64Encode(
       `${shortCode}${defaultPasskey}${timestamp}`
     );
 
     /*
-     * ---------------------------------------------------------
-     * GET OAUTH ACCESS TOKEN
-     * ---------------------------------------------------------
+     * 16. GET SANDBOX OAUTH ACCESS TOKEN
      */
 
     const basicAuth = base64Encode(
@@ -387,10 +628,7 @@ Deno.serve(async (req) => {
     const tokenData = await tokenResponse.json();
 
     if (!tokenResponse.ok || !tokenData.access_token) {
-      console.error(
-        "Daraja OAuth error:",
-        tokenData
-      );
+      console.error("Daraja OAuth request failed.");
 
       throw new Error(
         tokenData.errorMessage ||
@@ -399,49 +637,45 @@ Deno.serve(async (req) => {
       );
     }
 
-    const accessToken = tokenData.access_token;
+    const darajaAccessToken = tokenData.access_token;
 
     /*
-     * ---------------------------------------------------------
-     * SEND STK PUSH
-     * ---------------------------------------------------------
+     * 17. PREPARE STK PUSH
      */
 
     const stkPayload = {
       BusinessShortCode: Number(shortCode),
       Password: password,
       Timestamp: timestamp,
-      TransactionType:
-        "CustomerPayBillOnline",
-      Amount: Math.round(numericAmount),
+      TransactionType: "CustomerPayBillOnline",
+      Amount: paymentAmount,
       PartyA: normalizedPhone,
       PartyB: Number(shortCode),
       PhoneNumber: normalizedPhone,
       CallBackURL:
         "https://ejconenpabtyfloyjubi.supabase.co/functions/v1/mpesa-callback",
       AccountReference: saleNumber,
-      TransactionDesc:
-        "JESTA POS Payment",
+      TransactionDesc: "JESTA POS Payment",
     };
 
-    console.log(
-      "Sending M-Pesa STK Push:",
-      {
-        businessId: numericBusinessId,
-        businessName: business.name,
-        merchantType,
-        merchantNumber: shortCode,
-        ...stkPayload,
-        Password: "[REDACTED]",
-      }
-    );
+    console.log("Sending M-Pesa STK Push:", {
+      businessId: numericBusinessId,
+      userId: user.id,
+      merchantType,
+      amount: paymentAmount,
+      saleNumber,
+    });
+
+    /*
+     * 18. SEND STK PUSH
+     */
 
     const stkResponse = await fetch(
       "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${darajaAccessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(stkPayload),
@@ -450,21 +684,12 @@ Deno.serve(async (req) => {
 
     const stkData = await stkResponse.json();
 
-    console.log(
-      "Daraja STK response:",
-      stkData
-    );
-
-    /*
-     * ---------------------------------------------------------
-     * CHECK DARAJA RESPONSE
-     * ---------------------------------------------------------
-     */
-
     if (
       !stkResponse.ok ||
-      stkData.ResponseCode !== "0"
+      String(stkData.ResponseCode) !== "0"
     ) {
+      console.error("Daraja rejected the STK Push request.");
+
       throw new Error(
         stkData.errorMessage ||
           stkData.ResponseDescription ||
@@ -472,11 +697,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    const checkoutRequestId =
-      stkData.CheckoutRequestID;
-
-    const merchantRequestId =
-      stkData.MerchantRequestID;
+    const checkoutRequestId = stkData.CheckoutRequestID;
+    const merchantRequestId = stkData.MerchantRequestID;
 
     if (!checkoutRequestId) {
       throw new Error(
@@ -485,9 +707,10 @@ Deno.serve(async (req) => {
     }
 
     /*
-     * ---------------------------------------------------------
-     * SAVE PENDING M-PESA TRANSACTION
-     * ---------------------------------------------------------
+     * 19. SAVE PENDING TRANSACTION
+     *
+     * Keep the existing database fields and response
+     * shape expected by Sales.jsx.
      */
 
     const {
@@ -497,28 +720,20 @@ Deno.serve(async (req) => {
       .from("mpesa_transactions")
       .insert({
         business_id: numericBusinessId,
-        sale_number: String(saleNumber),
-        customer_id:
-          customerId === null ||
-          customerId === undefined ||
-          customerId === ""
-            ? null
-            : Number(customerId),
-        items,
-        amount: numericAmount,
+        sale_number: saleNumber.trim(),
+        customer_id: numericCustomerId,
+        items: requestedItems,
+        amount: paymentAmount,
         phone_number: normalizedPhone,
-        merchant_request_id:
-          merchantRequestId || null,
-        checkout_request_id:
-          checkoutRequestId,
-        tax_amount: Number(taxAmount) || 0,
-        discount_amount:
-          Number(discountAmount) || 0,
-        notes,
+        merchant_request_id: merchantRequestId || null,
+        checkout_request_id: checkoutRequestId,
+        tax_amount: numericTax,
+        discount_amount: numericDiscount,
+        notes:
+          typeof notes === "string" ? notes : null,
         result_code: null,
         result_description:
-          stkData.ResponseDescription ||
-          "STK Push accepted.",
+          stkData.ResponseDescription || "STK Push accepted.",
         status: "PENDING",
       })
       .select("*")
@@ -526,30 +741,23 @@ Deno.serve(async (req) => {
 
     if (transactionError) {
       console.error(
-        "Failed to save pending M-Pesa transaction:",
-        transactionError
+        "Failed to save pending M-Pesa transaction.",
+        transactionError.code || "Unknown database error"
       );
 
       throw new Error(
-        "M-Pesa request was accepted, but JESTA could not save the pending transaction."
+        "M-Pesa accepted the request, but JESTA could not save the pending transaction. Do not send another prompt until this transaction has been checked."
       );
     }
 
-    console.log(
-      "Pending M-Pesa transaction saved:",
-      {
-        id: transaction.id,
-        checkoutRequestId,
-        saleNumber,
-        businessId: numericBusinessId,
-        merchantNumber: shortCode,
-      }
-    );
+    console.log("Pending M-Pesa transaction saved:", {
+      id: transaction.id,
+      checkoutRequestId,
+      businessId: numericBusinessId,
+    });
 
     /*
-     * ---------------------------------------------------------
-     * RETURN SUCCESS TO JESTA FRONTEND
-     * ---------------------------------------------------------
+     * 20. RETURN THE EXISTING FRONTEND RESPONSE SHAPE
      */
 
     return jsonResponse({
@@ -559,8 +767,8 @@ Deno.serve(async (req) => {
         id: transaction.id,
         checkoutRequestId,
         merchantRequestId,
-        saleNumber,
-        amount: numericAmount,
+        saleNumber: saleNumber.trim(),
+        amount: paymentAmount,
         phoneNumber: normalizedPhone,
         status: "PENDING",
       },
@@ -568,7 +776,9 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error(
       "M-Pesa STK Push error:",
-      error
+      error instanceof Error
+        ? error.message
+        : "Unknown error"
     );
 
     return jsonResponse(
