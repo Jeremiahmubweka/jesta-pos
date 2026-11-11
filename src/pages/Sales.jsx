@@ -21,6 +21,14 @@ import {
 } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { supabase } from "../lib/supabase";
+import {
+  cacheBusinessCatalog,
+  getCachedBusinessCatalog,
+} from "../lib/offline/catalog";
+import {
+  getRecord,
+  putRecord,
+} from "../lib/offline/database";
 import Receipt from "../components/Receipt";
 
 function Sales() {
@@ -69,6 +77,17 @@ function Sales() {
 
   /*
    * LOAD PRODUCTS AND CUSTOMERS
+   *
+   * Online:
+   * 1. Load products and customers from Supabase.
+   * 2. Cache the successful catalogue in IndexedDB.
+   * 3. Save the business ID locally for future catalogue retrieval.
+   *
+   * Offline:
+   * 1. Retrieve the previously saved business ID.
+   * 2. Load that business's cached products and customers.
+   *
+   * Local caching problems must never break normal online sales.
    */
   const loadSalesData = async () => {
     try {
@@ -98,13 +117,86 @@ function Sales() {
         throw customersResult.error;
       }
 
-      setProducts(productsResult.data || []);
-      setCustomers(customersResult.data || []);
+      const products = productsResult.data || [];
+      const customers = customersResult.data || [];
+
+      // Preserve the existing online POS behaviour.
+      setProducts(products);
+      setCustomers(customers);
+
+      /*
+       * CACHE THE SUCCESSFULLY LOADED CATALOGUE
+       *
+       * This is deliberately separate from the online queries.
+       * If local caching fails, online sales continue working.
+       */
+      try {
+        const businessId = await getBusinessId();
+
+        await cacheBusinessCatalog(
+          businessId,
+          products,
+          customers
+        );
+
+        await putRecord("metadata", {
+          key: "offline_business_id",
+          value: businessId,
+          verified_at: new Date().toISOString(),
+        });
+
+        console.log("JESTA offline catalogue updated.");
+      } catch (cacheError) {
+        console.warn(
+          "JESTA could not update the offline catalogue:",
+          cacheError
+        );
+      }
     } catch (error) {
       console.error("Error loading sales data:", error);
-      setErrorMessage(
-        error.message || "Failed to load sales data."
-      );
+
+      /*
+       * ONLINE LOADING FAILED.
+       * ATTEMPT TO LOAD THE LAST CACHED CATALOGUE.
+       */
+      try {
+        const savedBusiness = await getRecord(
+          "metadata",
+          "offline_business_id"
+        );
+
+        if (
+          !savedBusiness ||
+          savedBusiness.value === undefined ||
+          savedBusiness.value === null
+        ) {
+          throw new Error(
+            "No previously cached business catalogue is available on this device."
+          );
+        }
+
+        const cachedCatalog = await getCachedBusinessCatalog(
+          savedBusiness.value
+        );
+
+        setProducts(cachedCatalog.products || []);
+        setCustomers(cachedCatalog.customers || []);
+
+        setErrorMessage(
+          "Offline catalogue loaded. Product and stock information may be outdated. Offline checkout is not enabled yet."
+        );
+      } catch (offlineError) {
+        console.error(
+          "Could not load offline catalogue:",
+          offlineError
+        );
+
+        setErrorMessage(
+          offlineError.message ||
+            error.message ||
+            "Failed to load sales data."
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -154,6 +246,7 @@ function Sales() {
       setParkedSales(data || []);
     } catch (error) {
       console.error("Error loading parked sales:", error);
+
       setErrorMessage(
         error.message || "Failed to load parked sales."
       );
@@ -364,6 +457,12 @@ function Sales() {
 
   /*
    * ADD A SCANNED BARCODE TO THE CART
+   *
+   * Online:
+   * Try Supabase first.
+   *
+   * Offline or online lookup failure:
+   * Search the products already loaded into the local catalogue.
    */
   const lookupBarcodeAndAddToCart = async (barcodeValue) => {
     const barcode = String(barcodeValue || "").trim();
@@ -377,28 +476,57 @@ function Sales() {
       setErrorMessage("");
       setSuccessMessage("");
 
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("barcode", barcode)
-        .eq("is_active", true)
-        .maybeSingle();
+      let product = null;
 
-      if (error) {
-        throw error;
+      /*
+       * FIRST ATTEMPT: ONLINE BARCODE LOOKUP
+       */
+      if (navigator.onLine) {
+        try {
+          const { data, error } = await supabase
+            .from("products")
+            .select("*")
+            .eq("barcode", barcode)
+            .eq("is_active", true)
+            .maybeSingle();
+
+          if (error) {
+            throw error;
+          }
+
+          product = data;
+        } catch (onlineLookupError) {
+          console.warn(
+            "Online barcode lookup failed; checking cached products:",
+            onlineLookupError
+          );
+        }
       }
 
-      if (!data) {
+      /*
+       * SECOND ATTEMPT: LOCAL CATALOGUE LOOKUP
+       */
+      if (!product) {
+        product =
+          products.find(
+            (item) =>
+              String(item.barcode || "").trim() === barcode &&
+              item.is_active !== false
+          ) || null;
+      }
+
+      if (!product) {
         setErrorMessage(
           `No active product found for barcode: ${barcode}`
         );
         return;
       }
 
-      addToCart(data);
+      addToCart(product);
       setBarcodeInput("");
     } catch (error) {
       console.error("Barcode lookup error:", error);
+
       setErrorMessage(
         error.message || "Failed to scan barcode."
       );
@@ -1017,6 +1145,22 @@ function Sales() {
     setErrorMessage("");
     setSuccessMessage("");
 
+    /*
+     * OFFLINE CHECKOUT PROTECTION
+     *
+     * Cached products can be viewed and scanned offline.
+     * Offline checkout is not enabled until pending-sale
+     * storage and safe server synchronization are implemented.
+     *
+     * This guard applies to cash, card and M-Pesa.
+     */
+    if (!navigator.onLine) {
+      setErrorMessage(
+        "You are offline. JESTA can display cached products, but offline checkout is not enabled yet. Please reconnect before completing this sale."
+      );
+      return;
+    }
+
     if (cart.length === 0) {
       setErrorMessage(
         "Please add at least one product to the cart."
@@ -1386,9 +1530,7 @@ function Sales() {
         </div>
       )}
 
-      {/* -------------------------------------------------- */}
       {/* PARKED / HELD SALES */}
-      {/* -------------------------------------------------- */}
       <section className="jesta-sales-section mb-6 overflow-hidden rounded-xl">
         <div className="flex flex-col gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">

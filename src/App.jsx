@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
@@ -13,18 +14,40 @@ import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 
 import { ThemeProvider } from "./theme/ThemeProvider";
+import {
+  getOfflineMetadata,
+  saveOfflineMetadata,
+} from "./lib/offline/database";
 
 const SAVED_PAGE_KEY = "jesta_active_page";
+const PROFILE_CACHE_PREFIX = "jesta_profile_";
+
+function isNetworkError(error) {
+  if (!error) return !navigator.onLine;
+
+  const message = String(
+    error.message || error
+  ).toLowerCase();
+
+  return (
+    !navigator.onLine ||
+    message.includes("failed to fetch") ||
+    message.includes("networkerror") ||
+    message.includes("network request failed") ||
+    message.includes("load failed") ||
+    message.includes("internet disconnected")
+  );
+}
 
 function AppContent() {
   const [session, setSession] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);
 
   const [activePage, setActivePage] = useState(() => {
     const savedPage = localStorage.getItem(SAVED_PAGE_KEY);
-
     return savedPage || "Dashboard";
   });
 
@@ -32,36 +55,50 @@ function AppContent() {
     let mounted = true;
 
     const getInitialSession = async () => {
-      const {
-        data: { session },
-        error,
-      } = await supabase.auth.getSession();
+      try {
+        const {
+          data: { session: currentSession },
+          error,
+        } = await supabase.auth.getSession();
 
-      if (error) {
-        console.error("Session check error:", error);
+        if (!mounted) return;
+
+        if (error) {
+          console.error("Session check error:", error);
+        }
+
+        setSession(currentSession || null);
+      } catch (error) {
+        console.error("Could not retrieve local session:", error);
+
+        if (mounted) {
+          setSession(null);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
-
-      if (!mounted) return;
-
-      setSession(session);
-      setLoading(false);
     };
 
     getInitialSession();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!mounted) return;
+    } = supabase.auth.onAuthStateChange(
+      (_event, currentSession) => {
+        if (!mounted) return;
 
-      setSession(session);
+        setSession(currentSession || null);
 
-      if (!session) {
-        setUserProfile(null);
-        setActivePage("Dashboard");
-        localStorage.removeItem(SAVED_PAGE_KEY);
+        if (!currentSession) {
+          setUserProfile(null);
+          setOfflineMode(false);
+          setActivePage("Dashboard");
+          localStorage.removeItem(SAVED_PAGE_KEY);
+        }
       }
-    });
+    );
 
     return () => {
       mounted = false;
@@ -82,72 +119,152 @@ function AppContent() {
       if (!session?.user?.id) {
         setUserProfile(null);
         setProfileLoading(false);
+        setOfflineMode(false);
         return;
       }
 
       setProfileLoading(true);
 
-      const { data, error } = await supabase
-        .from("user_profiles")
-        .select("*")
-        .eq("id", session.user.id)
-        .maybeSingle();
+      const cacheKey = `${PROFILE_CACHE_PREFIX}${session.user.id}`;
 
-      if (error) {
-        console.error("User profile error:", error);
+      try {
+        const { data, error } = await supabase
+          .from("user_profiles")
+          .select("*")
+          .eq("id", session.user.id)
+          .maybeSingle();
 
-        if (mounted) {
-          setUserProfile(null);
-          setProfileLoading(false);
+        if (error) {
+          console.error("User profile error:", error);
+
+          if (isNetworkError(error)) {
+            const cachedProfile =
+              await getOfflineMetadata(cacheKey);
+
+            if (!mounted) return;
+
+            if (
+              cachedProfile &&
+              cachedProfile.id === session.user.id &&
+              cachedProfile.is_active === true &&
+              cachedProfile.business_id !== null &&
+              cachedProfile.business_id !== undefined
+            ) {
+              setUserProfile(cachedProfile);
+              setOfflineMode(true);
+              setProfileLoading(false);
+
+              console.warn(
+                "JESTA is using the previously cached user profile. Server verification is unavailable."
+              );
+
+              return;
+            }
+
+            setUserProfile(null);
+            setOfflineMode(false);
+            setProfileLoading(false);
+
+            console.error(
+              "No valid cached user profile is available for offline access."
+            );
+
+            return;
+          }
+
+          if (mounted) {
+            setUserProfile(null);
+            setOfflineMode(false);
+            setProfileLoading(false);
+          }
+
+          return;
         }
 
-        return;
-      }
+        if (!data) {
+          console.error(
+            "No user profile found for this account."
+          );
 
-      if (!data) {
-        console.error(
-          "No user profile found for this account."
-        );
+          await supabase.auth.signOut({
+            scope: "local",
+          });
 
-        await supabase.auth.signOut({
-          scope: "local",
-        });
+          if (mounted) {
+            setUserProfile(null);
+            setProfileLoading(false);
+          }
 
-        if (mounted) {
-          setUserProfile(null);
-          setProfileLoading(false);
+          return;
         }
 
-        return;
-      }
+        if (!data.is_active) {
+          console.error(
+            "This user account is inactive."
+          );
 
-      if (!data.is_active) {
-        console.error(
-          "This user account is inactive."
-        );
+          await supabase.auth.signOut({
+            scope: "local",
+          });
 
-        await supabase.auth.signOut({
-          scope: "local",
-        });
+          if (mounted) {
+            setUserProfile(null);
+            setProfileLoading(false);
+          }
 
-        if (mounted) {
-          setUserProfile(null);
-          setProfileLoading(false);
+          return;
         }
 
-        return;
-      }
+        // Save only a profile successfully retrieved from Supabase.
+        await saveOfflineMetadata(cacheKey, data);
 
-      if (mounted) {
-        setUserProfile(data);
+        if (mounted) {
+          setUserProfile(data);
+          setOfflineMode(false);
+          setProfileLoading(false);
+        }
+      } catch (error) {
+        console.error("Profile loading failed:", error);
 
-        /*
-         * The user's last active page is now restored
-         * from localStorage instead of always starting
-         * on Dashboard.
-         */
+        if (isNetworkError(error)) {
+          try {
+            const cachedProfile =
+              await getOfflineMetadata(cacheKey);
 
-        setProfileLoading(false);
+            if (!mounted) return;
+
+            if (
+              cachedProfile &&
+              cachedProfile.id === session.user.id &&
+              cachedProfile.is_active === true &&
+              cachedProfile.business_id !== null &&
+              cachedProfile.business_id !== undefined
+            ) {
+              setUserProfile(cachedProfile);
+              setOfflineMode(true);
+            } else {
+              setUserProfile(null);
+              setOfflineMode(false);
+            }
+          } catch (cacheError) {
+            console.error(
+              "Could not retrieve the cached user profile:",
+              cacheError
+            );
+
+            if (mounted) {
+              setUserProfile(null);
+              setOfflineMode(false);
+            }
+          }
+        } else if (mounted) {
+          setUserProfile(null);
+          setOfflineMode(false);
+        }
+
+        if (mounted) {
+          setProfileLoading(false);
+        }
       }
     };
 
@@ -159,9 +276,7 @@ function AppContent() {
   }, [session]);
 
   const handleLogin = () => {
-    const savedPage =
-      localStorage.getItem(SAVED_PAGE_KEY);
-
+    const savedPage = localStorage.getItem(SAVED_PAGE_KEY);
     setActivePage(savedPage || "Dashboard");
   };
 
@@ -196,6 +311,10 @@ function AppContent() {
           <p>
             Your JESTA user profile could not be loaded.
           </p>
+
+          <p>
+            Connect to the internet and try again.
+          </p>
         </div>
       </div>
     );
@@ -225,18 +344,14 @@ function AppContent() {
         return userRole === "admin" ? (
           <Purchases />
         ) : (
-          <Dashboard
-            setActivePage={setActivePage}
-          />
+          <Dashboard setActivePage={setActivePage} />
         );
 
       case "Expenses":
         return userRole === "admin" ? (
           <Expenses />
         ) : (
-          <Dashboard
-            setActivePage={setActivePage}
-          />
+          <Dashboard setActivePage={setActivePage} />
         );
 
       case "Customers":
@@ -246,18 +361,14 @@ function AppContent() {
         return userRole === "admin" ? (
           <Reports />
         ) : (
-          <Dashboard
-            setActivePage={setActivePage}
-          />
+          <Dashboard setActivePage={setActivePage} />
         );
 
       case "Settings":
         return userRole === "admin" ? (
           <Settings />
         ) : (
-          <Dashboard
-            setActivePage={setActivePage}
-          />
+          <Dashboard setActivePage={setActivePage} />
         );
 
       default:
@@ -277,6 +388,23 @@ function AppContent() {
       userProfile={userProfile}
       userRole={userRole}
     >
+      {offlineMode && (
+        <div
+          style={{
+            padding: "10px 16px",
+            background: "#fff3cd",
+            color: "#664d03",
+            borderBottom: "1px solid #ffecb5",
+            fontSize: "13px",
+            fontWeight: 600,
+            textAlign: "center",
+          }}
+        >
+          OFFLINE MODE — Using previously cached account information.
+          Server verification is unavailable.
+        </div>
+      )}
+
       {renderPage()}
     </Layout>
   );

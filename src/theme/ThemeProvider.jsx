@@ -1,3 +1,4 @@
+
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import {
@@ -6,7 +7,27 @@ import {
   getTheme,
 } from "./themes";
 
+import {
+  getOfflineMetadata,
+  saveOfflineMetadata,
+} from "../lib/offline/database";
+
 const ThemeContext = createContext(null);
+
+function isNetworkError(error) {
+  const message = String(
+    error?.message || error || ""
+  ).toLowerCase();
+
+  return (
+    navigator.onLine === false ||
+    message.includes("failed to fetch") ||
+    message.includes("networkerror") ||
+    message.includes("network request failed") ||
+    message.includes("load failed") ||
+    message.includes("internet disconnected")
+  );
+}
 
 export function ThemeProvider({ children }) {
   const [themeId, setThemeId] = useState(DEFAULT_THEME);
@@ -25,7 +46,7 @@ export function ThemeProvider({ children }) {
 
     /*
      * Compatibility variables for the existing
-     * 9,691-line JESTA App.css design system.
+     * JESTA App.css design system.
      */
     root.style.setProperty(
       "--jesta-primary-dark",
@@ -58,22 +79,86 @@ export function ThemeProvider({ children }) {
     );
   };
 
+  const applyCachedTheme = async (userId) => {
+    if (!userId) {
+      return false;
+    }
+
+    try {
+      const cachedTheme = await getOfflineMetadata(
+        `jesta_theme_${userId}`
+      );
+
+      if (
+        !cachedTheme ||
+        cachedTheme.userId !== userId ||
+        !cachedTheme.businessId
+      ) {
+        return false;
+      }
+
+      const selectedTheme =
+        JESTA_THEMES[cachedTheme.themeId]
+          ? cachedTheme.themeId
+          : DEFAULT_THEME;
+
+      setBusinessId(cachedTheme.businessId);
+      setThemeId(selectedTheme);
+      applyTheme(selectedTheme);
+
+      return true;
+    } catch (error) {
+      console.error(
+        "Unable to restore cached JESTA theme:",
+        error
+      );
+
+      return false;
+    }
+  };
+
   const loadTheme = async () => {
     try {
       setLoadingTheme(true);
 
+      /*
+       * getSession reads the locally stored
+       * Supabase session. Unlike getUser(),
+       * it does not require server verification.
+       */
       const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
 
-      if (userError || !user) {
+      if (sessionError || !session?.user) {
         setBusinessId(null);
         setThemeId(DEFAULT_THEME);
         applyTheme(DEFAULT_THEME);
         return;
       }
 
+      const user = session.user;
+
+      /*
+       * If disconnected, restore the previously
+       * cached business and theme.
+       */
+      if (navigator.onLine === false) {
+        const restored = await applyCachedTheme(user.id);
+
+        if (!restored) {
+          setBusinessId(null);
+          setThemeId(DEFAULT_THEME);
+          applyTheme(DEFAULT_THEME);
+        }
+
+        return;
+      }
+
+      /*
+       * Retrieve the user's business from Supabase.
+       */
       const {
         data: profile,
         error: profileError,
@@ -83,7 +168,19 @@ export function ThemeProvider({ children }) {
         .eq("id", user.id)
         .maybeSingle();
 
-      if (profileError || !profile?.business_id) {
+      if (profileError) {
+        if (isNetworkError(profileError)) {
+          const restored = await applyCachedTheme(user.id);
+
+          if (!restored) {
+            setBusinessId(null);
+            setThemeId(DEFAULT_THEME);
+            applyTheme(DEFAULT_THEME);
+          }
+
+          return;
+        }
+
         console.error(
           "Unable to determine user's business:",
           profileError
@@ -95,8 +192,16 @@ export function ThemeProvider({ children }) {
         return;
       }
 
-      setBusinessId(profile.business_id);
+      if (!profile?.business_id) {
+        setBusinessId(null);
+        setThemeId(DEFAULT_THEME);
+        applyTheme(DEFAULT_THEME);
+        return;
+      }
 
+      /*
+       * Retrieve the business theme.
+       */
       const {
         data: business,
         error: businessError,
@@ -106,28 +211,98 @@ export function ThemeProvider({ children }) {
         .eq("id", profile.business_id)
         .maybeSingle();
 
-      if (businessError || !business) {
+      if (businessError) {
+        if (isNetworkError(businessError)) {
+          const restored = await applyCachedTheme(user.id);
+
+          if (!restored) {
+            setBusinessId(null);
+            setThemeId(DEFAULT_THEME);
+            applyTheme(DEFAULT_THEME);
+          }
+
+          return;
+        }
+
         console.error(
           "Unable to load business theme:",
           businessError
         );
 
+        setBusinessId(profile.business_id);
+        setThemeId(DEFAULT_THEME);
+        applyTheme(DEFAULT_THEME);
+        return;
+      }
+
+      if (!business) {
+        setBusinessId(profile.business_id);
         setThemeId(DEFAULT_THEME);
         applyTheme(DEFAULT_THEME);
         return;
       }
 
       const selectedTheme =
-        business.theme || DEFAULT_THEME;
+        JESTA_THEMES[business.theme]
+          ? business.theme
+          : DEFAULT_THEME;
 
+      setBusinessId(profile.business_id);
       setThemeId(selectedTheme);
       applyTheme(selectedTheme);
+
+      /*
+       * Save the latest business and theme locally.
+       * A caching failure must not interrupt normal
+       * online operation.
+       */
+      try {
+        await saveOfflineMetadata(
+          `jesta_theme_${user.id}`,
+          {
+            userId: user.id,
+            businessId: profile.business_id,
+            themeId: selectedTheme,
+          }
+        );
+      } catch (cacheError) {
+        console.error(
+          "Unable to cache JESTA theme:",
+          cacheError
+        );
+      }
     } catch (error) {
       console.error(
         "Theme loading error:",
         error
       );
 
+      /*
+       * Try the locally cached theme if the
+       * failure was caused by connectivity.
+       */
+      if (isNetworkError(error)) {
+        try {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+
+          const restored = await applyCachedTheme(
+            session?.user?.id
+          );
+
+          if (restored) {
+            return;
+          }
+        } catch (cacheError) {
+          console.error(
+            "Offline theme restoration failed:",
+            cacheError
+          );
+        }
+      }
+
+      setBusinessId(null);
       setThemeId(DEFAULT_THEME);
       applyTheme(DEFAULT_THEME);
     } finally {
@@ -172,6 +347,13 @@ export function ThemeProvider({ children }) {
       };
     }
 
+    if (navigator.onLine === false) {
+      return {
+        success: false,
+        error: "Connect to the internet to save a business theme.",
+      };
+    }
+
     const previousTheme = themeId;
 
     try {
@@ -184,8 +366,8 @@ export function ThemeProvider({ children }) {
 
       /*
        * Secure database update.
-       * The Supabase function verifies that
-       * the logged-in user is an administrator.
+       * Supabase verifies the logged-in user's
+       * administrator permissions.
        */
       const { data, error } = await supabase.rpc(
         "update_my_business_theme",
@@ -201,6 +383,32 @@ export function ThemeProvider({ children }) {
       if (data !== newThemeId) {
         throw new Error(
           "Theme was not saved correctly."
+        );
+      }
+
+      /*
+       * Update the local theme cache after
+       * the database confirms the change.
+       */
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (session?.user?.id) {
+          await saveOfflineMetadata(
+            `jesta_theme_${session.user.id}`,
+            {
+              userId: session.user.id,
+              businessId,
+              themeId: newThemeId,
+            }
+          );
+        }
+      } catch (cacheError) {
+        console.error(
+          "Unable to update cached theme:",
+          cacheError
         );
       }
 
