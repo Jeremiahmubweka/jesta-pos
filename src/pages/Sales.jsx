@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
@@ -28,6 +27,7 @@ import {
 import {
   getRecord,
   putRecord,
+  savePendingSale,
 } from "../lib/offline/database";
 import Receipt from "../components/Receipt";
 
@@ -61,6 +61,9 @@ function Sales() {
   const [cameraLoading, setCameraLoading] = useState(false);
   const [cameraError, setCameraError] = useState("");
 
+  // Keep the current online/offline state visible to checkout.
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
   const barcodeInputRef = useRef(null);
 
   const cameraVideoRef = useRef(null);
@@ -74,6 +77,34 @@ function Sales() {
       maximumFractionDigits: 2,
     })}`;
   };
+
+  /*
+   * MONITOR INTERNET CONNECTION
+   */
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setSuccessMessage(
+        "Internet connection restored. Pending offline sales are still awaiting synchronization."
+      );
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      setSuccessMessage(
+        "You are offline. Cached products are available. Cash checkout can be saved locally."
+      );
+      setErrorMessage("");
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   /*
    * LOAD PRODUCTS AND CUSTOMERS
@@ -183,7 +214,7 @@ function Sales() {
         setCustomers(cachedCatalog.customers || []);
 
         setErrorMessage(
-          "Offline catalogue loaded. Product and stock information may be outdated. Offline checkout is not enabled yet."
+          "Offline catalogue loaded. Product and stock information may be outdated. Cash sales can be saved locally."
         );
       } catch (offlineError) {
         console.error(
@@ -247,9 +278,12 @@ function Sales() {
     } catch (error) {
       console.error("Error loading parked sales:", error);
 
-      setErrorMessage(
-        error.message || "Failed to load parked sales."
-      );
+      // A failure to load held sales must not prevent offline checkout.
+      if (navigator.onLine) {
+        setErrorMessage(
+          error.message || "Failed to load parked sales."
+        );
+      }
     } finally {
       setLoadingParkedSales(false);
     }
@@ -729,6 +763,183 @@ function Sales() {
 
   /*
    * ---------------------------------------------------------
+   * SAVE OFFLINE CASH SALE
+   * ---------------------------------------------------------
+   *
+   * Offline sales are stored in IndexedDB.
+   * They are NOT yet confirmed by Supabase.
+   *
+   * Only cash payments are supported offline.
+   * Card and M-Pesa remain online-only.
+   */
+  const handleOfflineCashSale = async () => {
+    if (paymentMethod !== "cash") {
+      throw new Error(
+        "Only cash payments are available while offline. Reconnect to process card or M-Pesa payments."
+      );
+    }
+
+    if (cart.length === 0) {
+      throw new Error(
+        "Please add at least one product to the cart."
+      );
+    }
+
+    if (total <= 0) {
+      throw new Error("Sale total must be greater than zero.");
+    }
+
+    if (paid < total) {
+      throw new Error(
+        `Insufficient payment. Customer still owes ${formatCurrency(
+          total - paid
+        )}.`
+      );
+    }
+
+    /*
+     * USE THE BUSINESS ID SAVED DURING THE LAST
+     * SUCCESSFUL ONLINE CATALOGUE LOAD.
+     */
+    const savedBusiness = await getRecord(
+      "metadata",
+      "offline_business_id"
+    );
+
+    const businessId = savedBusiness?.value;
+
+    if (!businessId) {
+      throw new Error(
+        "JESTA cannot identify this business offline. Reconnect to the internet, open the sales workspace and try again."
+      );
+    }
+
+    /*
+     * GENERATE A UNIQUE LOCAL TRANSACTION ID.
+     */
+    const clientTransactionId =
+      globalThis.crypto?.randomUUID?.() ||
+      `JESTA-${businessId}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`;
+
+    const saleNumber = `OFFLINE-${businessId}-${Date.now()}`;
+
+    const customer =
+      customers.find(
+        (item) => String(item.id) === String(selectedCustomer)
+      ) || null;
+
+    /*
+     * SAVE THE PRODUCT DETAILS AND PRICE SNAPSHOTS.
+     *
+     * The server synchronization process must validate
+     * these prices against current server prices.
+     */
+    const offlineItems = cart.map((item) => ({
+      product_id: item.id,
+      name: item.name,
+      sku: item.sku || null,
+      barcode: item.barcode || null,
+      quantity: Number(item.quantity),
+      selling_price: Number(item.selling_price),
+      line_total:
+        Number(item.selling_price) * Number(item.quantity),
+    }));
+
+    const pendingSale = {
+      client_transaction_id: clientTransactionId,
+      business_id: businessId,
+      sale_number: saleNumber,
+
+      customer_id: selectedCustomer
+        ? Number(selectedCustomer)
+        : null,
+
+      customer_name: customer?.name || "Walk-in Customer",
+
+      items: offlineItems,
+
+      subtotal,
+      tax_amount: tax,
+      discount_amount: discount,
+      total_amount: total,
+      amount_paid: paid,
+      change_amount: change,
+      balance_due: 0,
+
+      payment_method: "cash",
+
+      transaction_reference:
+        transactionReference.trim() || null,
+
+      created_at: new Date().toISOString(),
+
+      status: "pending",
+      sync_status: "pending",
+    };
+
+    /*
+     * SAVE FIRST.
+     *
+     * If IndexedDB fails, the cart remains untouched.
+     */
+    await savePendingSale(pendingSale);
+
+    /*
+     * CREATE THE LOCAL RECEIPT.
+     *
+     * This is not a server-confirmed sale.
+     */
+    const receiptSale = {
+      id: clientTransactionId,
+      client_transaction_id: clientTransactionId,
+      sale_number: saleNumber,
+      created_at: pendingSale.created_at,
+      customer_name: pendingSale.customer_name,
+
+      subtotal,
+      tax_amount: tax,
+      discount_amount: discount,
+      total_amount: total,
+      amount_paid: paid,
+      change_amount: change,
+      balance_amount: 0,
+
+      payment_method: "cash",
+
+      transaction_reference:
+        pendingSale.transaction_reference,
+
+      sync_status: "pending",
+      status: "pending",
+
+      items: offlineItems,
+    };
+
+    setCompletedSale(receiptSale);
+
+    setSuccessMessage(
+      `Cash sale ${saleNumber} saved on this device. It is awaiting synchronization with JESTA.`
+    );
+
+    /*
+     * CLEAR THE CART ONLY AFTER THE LOCAL SAVE SUCCEEDS.
+     */
+    setCart([]);
+    setAmountPaid("");
+    setSelectedCustomer("");
+    setTransactionReference("");
+    setMpesaPhoneNumber("");
+    setPaymentMethod("cash");
+
+    setTimeout(() => {
+      barcodeInputRef.current?.focus();
+    }, 200);
+  };
+
+  /*
+   * ---------------------------------------------------------
    * PARK THE CURRENT SALE
    * ---------------------------------------------------------
    *
@@ -742,6 +953,13 @@ function Sales() {
 
     if (cart.length === 0) {
       setErrorMessage("Add products before parking a sale.");
+      return;
+    }
+
+    if (!navigator.onLine) {
+      setErrorMessage(
+        "Holding a sale requires an internet connection. Offline held-sale storage has not yet been implemented."
+      );
       return;
     }
 
@@ -841,9 +1059,6 @@ function Sales() {
       setErrorMessage("");
       setSuccessMessage("");
 
-      /*
-       * Restore the saved cart and payment details.
-       */
       setCart(
         savedItems.map((item) => ({
           ...item,
@@ -869,9 +1084,6 @@ function Sales() {
 
       setAmountPaid("");
 
-      /*
-       * Delete the parked copy after restoring its data.
-       */
       const { error } = await supabase
         .from("parked_sales")
         .delete()
@@ -1088,9 +1300,6 @@ function Sales() {
     const transaction =
       await waitForMpesaPayment(checkoutRequestId);
 
-    /*
-     * The callback completes the sale after successful payment.
-     */
     const receiptSale = {
       id: transaction.sale_id,
       sale_number: transaction.sale_number || saleNumber,
@@ -1146,19 +1355,36 @@ function Sales() {
     setSuccessMessage("");
 
     /*
-     * OFFLINE CHECKOUT PROTECTION
+     * OFFLINE CHECKOUT
      *
-     * Cached products can be viewed and scanned offline.
-     * Offline checkout is not enabled until pending-sale
-     * storage and safe server synchronization are implemented.
-     *
-     * This guard applies to cash, card and M-Pesa.
+     * Only cash is accepted offline.
+     * Card and M-Pesa must use their online payment flows.
      */
     if (!navigator.onLine) {
-      setErrorMessage(
-        "You are offline. JESTA can display cached products, but offline checkout is not enabled yet. Please reconnect before completing this sale."
-      );
-      return;
+      if (paymentMethod !== "cash") {
+        setErrorMessage(
+          "Card and M-Pesa payments require an internet connection. Switch to cash or reconnect before completing this sale."
+        );
+        return;
+      }
+
+      try {
+        setProcessingSale(true);
+
+        await handleOfflineCashSale();
+
+        return;
+      } catch (error) {
+        console.error("Offline cash sale error:", error);
+
+        setErrorMessage(
+          error.message || "Could not save the offline sale."
+        );
+
+        return;
+      } finally {
+        setProcessingSale(false);
+      }
     }
 
     if (cart.length === 0) {
@@ -1465,14 +1691,38 @@ function Sales() {
             </p>
           </div>
 
-          <div className="jesta-sales-cart-count flex items-center gap-2 rounded-lg px-4 py-3">
-            <ShoppingCart size={20} />
-            <span className="text-sm font-medium">
-              {cart.length} item{cart.length === 1 ? "" : "s"} in cart
-            </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <div
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
+                isOnline
+                  ? "bg-green-100 text-green-800"
+                  : "bg-amber-100 text-amber-800"
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  isOnline ? "bg-green-600" : "bg-amber-600"
+                }`}
+              />
+              {isOnline ? "Online" : "Offline"}
+            </div>
+
+            <div className="jesta-sales-cart-count flex items-center gap-2 rounded-lg px-4 py-3">
+              <ShoppingCart size={20} />
+              <span className="text-sm font-medium">
+                {cart.length} item{cart.length === 1 ? "" : "s"} in cart
+              </span>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* OFFLINE NOTICE */}
+      {!isOnline && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <strong>Offline mode:</strong> You are using cached product and customer information. Cash sales can be saved on this device and will require synchronization when the connection returns. Card and M-Pesa payments are unavailable offline.
+        </div>
+      )}
 
       {/* ERROR MESSAGE */}
       {errorMessage && (
@@ -1510,10 +1760,15 @@ function Sales() {
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="font-semibold text-slate-900">
-                Sale Completed
+                {completedSale.sync_status === "pending"
+                  ? "Offline Sale Recorded"
+                  : "Sale Completed"}
               </h2>
+
               <p className="text-sm text-slate-600">
-                Receipt is ready for printing.
+                {completedSale.sync_status === "pending"
+                  ? "This sale is saved on this device and is awaiting synchronization with JESTA."
+                  : "Receipt is ready for printing."}
               </p>
             </div>
 
@@ -1525,6 +1780,18 @@ function Sales() {
               <X size={18} />
             </button>
           </div>
+
+          {completedSale.sync_status === "pending" && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <strong>Pending synchronization</strong>
+              <p className="mt-1">
+                This transaction is stored locally. It has not yet been confirmed or recorded in the online sales database.
+              </p>
+              <p className="mt-1 text-xs">
+                Transaction ID: {completedSale.client_transaction_id}
+              </p>
+            </div>
+          )}
 
           <Receipt sale={completedSale} />
         </div>
@@ -1551,7 +1818,7 @@ function Sales() {
           <button
             type="button"
             onClick={loadParkedSales}
-            disabled={loadingParkedSales || processingSale}
+            disabled={loadingParkedSales || processingSale || !isOnline}
             className="jesta-btn justify-center border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             <RefreshCw
@@ -1647,7 +1914,7 @@ function Sales() {
                     <button
                       type="button"
                       onClick={() => resumeParkedSale(sale)}
-                      disabled={processingSale}
+                      disabled={processingSale || !isOnline}
                       className="jesta-btn jesta-sales-primary flex-1 justify-center disabled:opacity-50"
                     >
                       <RotateCcw size={16} />
@@ -1657,7 +1924,7 @@ function Sales() {
                     <button
                       type="button"
                       onClick={() => deleteParkedSale(sale)}
-                      disabled={processingSale}
+                      disabled={processingSale || !isOnline}
                       className="jesta-btn justify-center border border-red-200 bg-white text-red-600 hover:bg-red-50 disabled:opacity-50"
                       title="Delete parked sale"
                       aria-label="Delete parked sale"
@@ -2046,6 +2313,12 @@ function Sales() {
                   Card
                 </button>
               </div>
+
+              {!isOnline && paymentMethod !== "cash" && (
+                <p className="mt-2 text-xs text-red-600">
+                  This payment method requires an internet connection. Select Cash to record an offline sale.
+                </p>
+              )}
             </div>
 
             {/* M-PESA PHONE NUMBER */}
@@ -2178,7 +2451,11 @@ function Sales() {
             <button
               type="button"
               onClick={parkCurrentSale}
-              disabled={processingSale || cart.length === 0}
+              disabled={
+                processingSale ||
+                cart.length === 0 ||
+                !isOnline
+              }
               className="jesta-btn mt-5 mb-3 w-full justify-center border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <PauseCircle size={18} />
@@ -2195,7 +2472,8 @@ function Sales() {
                   cart.length === 0 ||
                   (paymentMethod !== "mpesa" && paid < total) ||
                   (paymentMethod === "mpesa" &&
-                    !mpesaPhoneNumber.trim())
+                    !mpesaPhoneNumber.trim()) ||
+                  (!isOnline && paymentMethod !== "cash")
                 }
                 className="jesta-complete-sale jesta-btn justify-center sm:col-span-1"
               >
@@ -2212,9 +2490,11 @@ function Sales() {
                   ? paymentMethod === "mpesa"
                     ? "Waiting for Payment..."
                     : "Processing..."
-                  : paymentMethod === "mpesa"
-                    ? "Send M-Pesa Prompt"
-                    : "Complete Sale"}
+                  : !isOnline
+                    ? "Save Offline Cash Sale"
+                    : paymentMethod === "mpesa"
+                      ? "Send M-Pesa Prompt"
+                      : "Complete Sale"}
               </button>
 
               <button
