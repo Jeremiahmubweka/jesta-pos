@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
@@ -28,6 +29,7 @@ import {
   getRecord,
   putRecord,
   savePendingSale,
+  getBusinessRecords,
 } from "../lib/offline/database";
 import Receipt from "../components/Receipt";
 
@@ -56,6 +58,10 @@ function Sales() {
   const [successMessage, setSuccessMessage] = useState("");
   const [completedSale, setCompletedSale] = useState(null);
 
+  // Offline synchronization state
+  const [pendingOfflineCount, setPendingOfflineCount] = useState(0);
+  const [syncingOfflineSales, setSyncingOfflineSales] = useState(false);
+
   // Camera scanner state
   const [cameraScannerOpen, setCameraScannerOpen] = useState(false);
   const [cameraLoading, setCameraLoading] = useState(false);
@@ -71,6 +77,9 @@ function Sales() {
   const barcodeReaderRef = useRef(null);
   const cameraProcessingRef = useRef(false);
 
+  // Prevent simultaneous synchronization attempts.
+  const syncingOfflineSalesRef = useRef(false);
+
   const formatCurrency = (amount) => {
     return `KSh ${Number(amount || 0).toLocaleString("en-KE", {
       minimumFractionDigits: 2,
@@ -85,7 +94,7 @@ function Sales() {
     const handleOnline = () => {
       setIsOnline(true);
       setSuccessMessage(
-        "Internet connection restored. Pending offline sales are still awaiting synchronization."
+        "Internet connection restored. JESTA is checking for pending offline sales."
       );
     };
 
@@ -254,6 +263,311 @@ function Sales() {
 
     return businessId;
   };
+
+  /*
+   * ---------------------------------------------------------
+   * SYNCHRONIZE PENDING OFFLINE SALES
+   * ---------------------------------------------------------
+   *
+   * This function runs when:
+   * 1. The Sales workspace finishes loading while online.
+   * 2. The internet connection returns.
+   *
+   * Each transaction is sent using its original
+   * client_transaction_id.
+   *
+   * The Supabase function uses that ID to prevent duplicate
+   * sales when a request is retried.
+   */
+  const syncPendingOfflineSales = async () => {
+    if (!navigator.onLine) {
+      return;
+    }
+
+    if (syncingOfflineSalesRef.current) {
+      return;
+    }
+
+    syncingOfflineSalesRef.current = true;
+    setSyncingOfflineSales(true);
+
+    let successfullySynced = 0;
+
+    try {
+      const businessId = await getBusinessId();
+
+      const localSales = await getBusinessRecords(
+        "pending_sales",
+        businessId
+      );
+
+      const unsynchronizedSales = (localSales || []).filter(
+        (sale) => sale.sync_status !== "synced"
+      );
+
+      setPendingOfflineCount(unsynchronizedSales.length);
+
+      if (unsynchronizedSales.length === 0) {
+        return;
+      }
+
+      console.log(
+        `JESTA found ${unsynchronizedSales.length} offline sale(s) awaiting synchronization.`
+      );
+
+      for (const sale of unsynchronizedSales) {
+        if (!navigator.onLine) {
+          break;
+        }
+
+        // Conflicts require attention and should not be retried automatically.
+        if (sale.sync_status === "conflict") {
+          continue;
+        }
+
+        try {
+          /*
+           * MARK THE LOCAL TRANSACTION AS SYNCING.
+           */
+          await putRecord("pending_sales", {
+            ...sale,
+            sync_status: "syncing",
+            last_sync_attempt_at: new Date().toISOString(),
+          });
+
+          /*
+           * SEND THE ORIGINAL SALE TO SUPABASE.
+           */
+          const { data, error } = await supabase.rpc(
+            "sync_offline_sale",
+            {
+              p_business_id: sale.business_id,
+              p_client_transaction_id:
+                sale.client_transaction_id,
+              p_sale_number: sale.sale_number,
+              p_customer_id: sale.customer_id || null,
+              p_items: sale.items,
+              p_amount_paid: sale.amount_paid,
+              p_expected_total: sale.total_amount,
+              p_tax_amount: sale.tax_amount || 0,
+              p_discount_amount: sale.discount_amount || 0,
+              p_notes: "Offline cash sale synchronized",
+            }
+          );
+
+          if (error) {
+            throw error;
+          }
+
+          /*
+           * SUPABASE RETURNS JSONB.
+           */
+          const syncResult =
+            typeof data === "string" ? JSON.parse(data) : data;
+
+          if (
+            !syncResult ||
+            !syncResult.sale_id
+          ) {
+            throw new Error(
+              "Supabase did not return a confirmed sale ID."
+            );
+          }
+
+          /*
+           * MARK THE LOCAL TRANSACTION AS SYNCHRONIZED.
+           */
+          await putRecord("pending_sales", {
+            ...sale,
+            status: "completed",
+            sync_status: "synced",
+            server_sale_id: syncResult.sale_id,
+            synced_at: new Date().toISOString(),
+            sync_error: null,
+          });
+
+          successfullySynced += 1;
+
+          /*
+           * UPDATE THE VISIBLE RECEIPT IF IT BELONGS
+           * TO THE TRANSACTION THAT WAS JUST SYNCHRONIZED.
+           */
+          setCompletedSale((currentSale) => {
+            if (
+              !currentSale ||
+              currentSale.client_transaction_id !==
+                sale.client_transaction_id
+            ) {
+              return currentSale;
+            }
+
+            return {
+              ...currentSale,
+              id: syncResult.sale_id,
+              server_sale_id: syncResult.sale_id,
+              status: "completed",
+              sync_status: "synced",
+              synced_at: new Date().toISOString(),
+            };
+          });
+
+          console.log(
+            `Offline sale ${sale.sale_number} synchronized successfully.`,
+            syncResult
+          );
+        } catch (saleError) {
+          console.error(
+            `Could not synchronize offline sale ${sale.sale_number}:`,
+            saleError
+          );
+
+          const message =
+            saleError?.message ||
+            "Unknown synchronization error.";
+
+          /*
+           * IDENTIFY ERRORS THAT REQUIRE MANUAL ATTENTION.
+           *
+           * Examples:
+           * - Product price changed.
+           * - Insufficient stock.
+           * - Product is no longer active.
+           * - Customer no longer exists.
+           * - Sale totals do not match.
+           */
+          const conflictKeywords = [
+            "price",
+            "stock",
+            "customer",
+            "product",
+            "total",
+            "amount",
+            "duplicate",
+            "invalid",
+            "inactive",
+            "not found",
+            "does not exist",
+          ];
+
+          const isConflict = conflictKeywords.some((keyword) =>
+            message.toLowerCase().includes(keyword)
+          );
+
+          /*
+           * RESTORE THE LOCAL RECORD.
+           *
+           * A temporary network failure remains pending.
+           * A business/data conflict is marked for attention.
+           */
+          await putRecord("pending_sales", {
+            ...sale,
+            status: "pending",
+            sync_status: isConflict ? "conflict" : "pending",
+            sync_error: message,
+            last_sync_attempt_at: new Date().toISOString(),
+          });
+
+          /*
+           * SAVE CONFLICT DETAILS FOR FUTURE REVIEW.
+           */
+          if (isConflict) {
+            try {
+              await putRecord("sync_conflicts", {
+                id: `${sale.business_id}-${sale.client_transaction_id}`,
+                business_id: sale.business_id,
+                client_transaction_id:
+                  sale.client_transaction_id,
+                sale_number: sale.sale_number,
+                error_message: message,
+                created_at: new Date().toISOString(),
+                resolved: false,
+              });
+            } catch (conflictSaveError) {
+              console.error(
+                "Could not save offline synchronization conflict:",
+                conflictSaveError
+              );
+            }
+          } else {
+            /*
+             * A likely connection or temporary server failure:
+             * stop this batch and retry when the connection
+             * is available again.
+             */
+            if (!navigator.onLine) {
+              break;
+            }
+
+            break;
+          }
+        }
+      }
+
+      /*
+       * REFRESH THE LOCAL UNSYNCHRONIZED COUNT.
+       */
+      const refreshedSales = await getBusinessRecords(
+        "pending_sales",
+        businessId
+      );
+
+      const remainingSales = (refreshedSales || []).filter(
+        (sale) => sale.sync_status !== "synced"
+      );
+
+      setPendingOfflineCount(remainingSales.length);
+
+      if (successfullySynced > 0) {
+        setSuccessMessage(
+          `${successfullySynced} offline cash sale${successfullySynced === 1 ? "" : "s"} successfully synchronized with JESTA.`
+        );
+
+        /*
+         * Refresh product stock after confirmed synchronization.
+         */
+        await loadSalesData();
+      }
+
+      if (
+        remainingSales.some(
+          (sale) => sale.sync_status === "conflict"
+        )
+      ) {
+        setErrorMessage(
+          "Some offline sales need attention before they can be synchronized. Their records remain safely stored on this device."
+        );
+      }
+    } catch (error) {
+      console.error(
+        "JESTA offline synchronization error:",
+        error
+      );
+
+      if (navigator.onLine) {
+        setErrorMessage(
+          error.message ||
+            "Could not synchronize offline sales. They remain saved on this device."
+        );
+      }
+    } finally {
+      syncingOfflineSalesRef.current = false;
+      setSyncingOfflineSales(false);
+    }
+  };
+
+  /*
+   * AUTOMATICALLY CHECK FOR OFFLINE SALES
+   *
+   * Wait until the Sales workspace has finished its initial
+   * loading before attempting synchronization.
+   */
+  useEffect(() => {
+    if (!isOnline || loading) {
+      return;
+    }
+
+    syncPendingOfflineSales();
+  }, [isOnline, loading]);
 
   /*
    * LOAD PARKED SALES
@@ -885,6 +1199,8 @@ function Sales() {
      * If IndexedDB fails, the cart remains untouched.
      */
     await savePendingSale(pendingSale);
+
+    setPendingOfflineCount((current) => current + 1);
 
     /*
      * CREATE THE LOCAL RECEIPT.
@@ -1525,7 +1841,6 @@ function Sales() {
    */
   const handleCustomerChange = (event) => {
     const customerId = event.target.value;
-
     setSelectedCustomer(customerId);
 
     if (customerId) {
@@ -1707,6 +2022,17 @@ function Sales() {
               {isOnline ? "Online" : "Offline"}
             </div>
 
+            {pendingOfflineCount > 0 && (
+              <div className="flex items-center gap-2 rounded-lg bg-amber-100 px-3 py-2 text-sm font-medium text-amber-800">
+                {syncingOfflineSales ? (
+                  <RefreshCw size={15} className="animate-spin" />
+                ) : (
+                  <Clock size={15} />
+                )}
+                {pendingOfflineCount} unsynced sale{pendingOfflineCount === 1 ? "" : "s"}
+              </div>
+            )}
+
             <div className="jesta-sales-cart-count flex items-center gap-2 rounded-lg px-4 py-3">
               <ShoppingCart size={20} />
               <span className="text-sm font-medium">
@@ -1721,6 +2047,14 @@ function Sales() {
       {!isOnline && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           <strong>Offline mode:</strong> You are using cached product and customer information. Cash sales can be saved on this device and will require synchronization when the connection returns. Card and M-Pesa payments are unavailable offline.
+        </div>
+      )}
+
+      {/* SYNCHRONIZATION NOTICE */}
+      {isOnline && syncingOfflineSales && (
+        <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+          <RefreshCw size={18} className="animate-spin" />
+          Synchronizing saved offline cash sales with JESTA...
         </div>
       )}
 
@@ -1789,6 +2123,15 @@ function Sales() {
               </p>
               <p className="mt-1 text-xs">
                 Transaction ID: {completedSale.client_transaction_id}
+              </p>
+            </div>
+          )}
+
+          {completedSale.sync_status === "synced" && (
+            <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+              <strong>Offline sale synchronized</strong>
+              <p className="mt-1">
+                This sale has now been confirmed and recorded in the JESTA online database.
               </p>
             </div>
           )}
