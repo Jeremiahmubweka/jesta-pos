@@ -311,7 +311,9 @@ export function ThemeProvider({ children }) {
   };
 
   useEffect(() => {
-    loadTheme();
+    const timer = setTimeout(() => {
+      loadTheme();
+    }, 0);
 
     const {
       data: { subscription },
@@ -328,8 +330,11 @@ export function ThemeProvider({ children }) {
     );
 
     return () => {
+      clearTimeout(timer);
       subscription.unsubscribe();
     };
+    // loadTheme uses stable React setters and module-level services.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const changeTheme = async (newThemeId) => {
@@ -453,6 +458,8 @@ export function ThemeProvider({ children }) {
   );
 }
 
+// Keep the hook export here for compatibility with existing imports.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useTheme() {
   const context = useContext(ThemeContext);
 

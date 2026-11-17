@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Receipt,
   Plus,
@@ -41,10 +42,6 @@ function Expenses() {
     notes: "",
   });
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
   // =========================
   // GET BUSINESS ID
   // =========================
@@ -68,43 +65,55 @@ function Expenses() {
   }
 
   // =========================
-  // LOAD DATA
+  // FETCH EXPENSE DATA
+  // This function fetches data without changing React state.
   // =========================
-  async function loadData() {
-    setLoading(true);
-    setError("");
+  const fetchExpenseData = useCallback(async () => {
+    const businessId = await getBusinessId();
 
+    const expenseResult = await supabase
+      .from("expenses")
+      .select(`
+        *,
+        expense_categories (
+          id,
+          name
+        )
+      `)
+      .eq("business_id", businessId)
+      .order("expense_date", { ascending: false });
+
+    if (expenseResult.error) {
+      throw expenseResult.error;
+    }
+
+    const categoryResult = await supabase
+      .from("expense_categories")
+      .select("id, name, description")
+      .eq("business_id", businessId)
+      .order("name", { ascending: true });
+
+    if (categoryResult.error) {
+      throw categoryResult.error;
+    }
+
+    return {
+      expenses: expenseResult.data || [],
+      categories: categoryResult.data || [],
+    };
+  }, []);
+
+  // =========================
+  // LOAD DATA
+  // Used for manual refresh.
+  // =========================
+  const loadData = useCallback(async () => {
     try {
-      const businessId = await getBusinessId();
+      const data = await fetchExpenseData();
 
-      const expenseResult = await supabase
-        .from("expenses")
-        .select(`
-          *,
-          expense_categories (
-            id,
-            name
-          )
-        `)
-        .eq("business_id", businessId)
-        .order("expense_date", { ascending: false });
-
-      if (expenseResult.error) {
-        throw expenseResult.error;
-      }
-
-      const categoryResult = await supabase
-        .from("expense_categories")
-        .select("id, name, description")
-        .eq("business_id", businessId)
-        .order("name", { ascending: true });
-
-      if (categoryResult.error) {
-        throw categoryResult.error;
-      }
-
-      setExpenses(expenseResult.data || []);
-      setCategories(categoryResult.data || []);
+      setExpenses(data.expenses);
+      setCategories(data.categories);
+      setError("");
     } catch (err) {
       console.error("Error loading expenses:", err);
 
@@ -114,6 +123,53 @@ function Expenses() {
     } finally {
       setLoading(false);
     }
+  }, [fetchExpenseData]);
+
+  // =========================
+  // INITIAL LOAD
+  // Fetch first, then update state after the async work completes.
+  // =========================
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initialLoad() {
+      try {
+        const data = await fetchExpenseData();
+
+        if (isMounted) {
+          setExpenses(data.expenses);
+          setCategories(data.categories);
+          setError("");
+        }
+      } catch (err) {
+        console.error("Error loading expenses:", err);
+
+        if (isMounted) {
+          setError(
+            err.message || "Unable to load expenses. Please try again."
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void initialLoad();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchExpenseData]);
+
+  // =========================
+  // REFRESH DATA
+  // =========================
+  async function handleRefresh() {
+    setLoading(true);
+    setError("");
+    await loadData();
   }
 
   // =========================
@@ -187,8 +243,8 @@ function Expenses() {
         category_id: formData.category_id
           ? Number(formData.category_id)
           : null,
-        description: description,
-        amount: amount,
+        description,
+        amount,
         payment_method: formData.payment_method || null,
         transaction_reference:
           formData.transaction_reference.trim() || null,
@@ -215,11 +271,8 @@ function Expenses() {
       }
 
       setExpenses((previous) => [result.data, ...previous]);
-
       setMessage("Expense added successfully.");
-
       setShowForm(false);
-
       resetForm();
     } catch (err) {
       console.error("Error adding expense:", err);
@@ -321,13 +374,6 @@ function Expenses() {
     );
   }, [filteredExpenses]);
 
-  const allExpensesTotal = useMemo(() => {
-    return expenses.reduce(
-      (total, expense) => total + Number(expense.amount || 0),
-      0
-    );
-  }, [expenses]);
-
   const averageExpense = useMemo(() => {
     if (filteredExpenses.length === 0) {
       return 0;
@@ -340,13 +386,10 @@ function Expenses() {
   // FORMAT MONEY
   // =========================
   function formatMoney(amount) {
-    return `KSh ${Number(amount || 0).toLocaleString(
-      "en-KE",
-      {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }
-    )}`;
+    return `KSh ${Number(amount || 0).toLocaleString("en-KE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
   }
 
   // =========================
@@ -370,21 +413,10 @@ function Expenses() {
   function getPaymentClass(method) {
     const value = method?.toLowerCase();
 
-    if (value === "cash") {
-      return "cash";
-    }
-
-    if (value === "m-pesa") {
-      return "mpesa";
-    }
-
-    if (value === "bank") {
-      return "bank";
-    }
-
-    if (value === "card") {
-      return "card";
-    }
+    if (value === "cash") return "cash";
+    if (value === "m-pesa") return "mpesa";
+    if (value === "bank") return "bank";
+    if (value === "card") return "card";
 
     return "other";
   }
@@ -412,9 +444,7 @@ function Expenses() {
 
   return (
     <div className="jesta-expenses-page">
-      {/* =========================
-          PAGE HEADER
-      ========================= */}
+      {/* PAGE HEADER */}
       <div className="jesta-expenses-header">
         <div className="jesta-expenses-brand">
           <div className="jesta-expenses-brand-icon">
@@ -438,9 +468,7 @@ function Expenses() {
         </button>
       </div>
 
-      {/* =========================
-          ALERTS
-      ========================= */}
+      {/* ALERTS */}
       {message && (
         <div className="jesta-expenses-success-alert">
           <div className="jesta-expenses-alert-icon">
@@ -453,9 +481,7 @@ function Expenses() {
 
       {error && (
         <div className="jesta-expenses-error-alert">
-          <div className="jesta-expenses-alert-icon">
-            !
-          </div>
+          <div className="jesta-expenses-alert-icon">!</div>
 
           <span>{error}</span>
 
@@ -468,9 +494,7 @@ function Expenses() {
         </div>
       )}
 
-      {/* =========================
-          SUMMARY CARDS
-      ========================= */}
+      {/* SUMMARY CARDS */}
       <div className="jesta-expenses-stats">
         <div className="jesta-expenses-stat">
           <div className="jesta-expenses-stat-icon expenses">
@@ -529,9 +553,7 @@ function Expenses() {
         </div>
       </div>
 
-      {/* =========================
-          TOOLBAR
-      ========================= */}
+      {/* TOOLBAR */}
       <div className="jesta-expenses-toolbar">
         <div className="jesta-expenses-search">
           <Search size={18} />
@@ -540,9 +562,7 @@ function Expenses() {
             type="text"
             placeholder="Search description, category, payment or reference..."
             value={searchTerm}
-            onChange={(event) =>
-              setSearchTerm(event.target.value)
-            }
+            onChange={(event) => setSearchTerm(event.target.value)}
           />
 
           {searchTerm && (
@@ -558,18 +578,13 @@ function Expenses() {
 
         <select
           value={categoryFilter}
-          onChange={(event) =>
-            setCategoryFilter(event.target.value)
-          }
+          onChange={(event) => setCategoryFilter(event.target.value)}
           className="jesta-expenses-filter"
         >
           <option value="all">All Categories</option>
 
           {categories.map((category) => (
-            <option
-              key={category.id}
-              value={category.id}
-            >
+            <option key={category.id} value={category.id}>
               {category.name}
             </option>
           ))}
@@ -577,7 +592,7 @@ function Expenses() {
 
         <button
           className="jesta-expenses-refresh"
-          onClick={loadData}
+          onClick={handleRefresh}
           disabled={loading}
           title="Refresh expenses"
         >
@@ -589,9 +604,7 @@ function Expenses() {
         </button>
       </div>
 
-      {/* =========================
-          EXPENSE TABLE
-      ========================= */}
+      {/* EXPENSE TABLE */}
       <section className="jesta-expenses-card">
         <div className="jesta-expenses-card-header">
           <div>
@@ -661,23 +674,17 @@ function Expenses() {
                       <div className="jesta-expenses-date">
                         <CalendarDays size={15} />
                         <span>
-                          {formatDate(
-                            expense.expense_date
-                          )}
+                          {formatDate(expense.expense_date)}
                         </span>
                       </div>
                     </td>
 
                     <td>
                       <div className="jesta-expenses-description">
-                        <strong>
-                          {expense.description}
-                        </strong>
+                        <strong>{expense.description}</strong>
 
                         {expense.notes && (
-                          <small>
-                            {expense.notes}
-                          </small>
+                          <small>{expense.notes}</small>
                         )}
                       </div>
                     </td>
@@ -715,18 +722,11 @@ function Expenses() {
                       <button
                         className="jesta-expenses-delete"
                         title="Delete expense"
-                        onClick={() =>
-                          handleDelete(expense.id)
-                        }
-                        disabled={
-                          deletingId === expense.id
-                        }
+                        onClick={() => handleDelete(expense.id)}
+                        disabled={deletingId === expense.id}
                       >
                         {deletingId === expense.id ? (
-                          <Loader2
-                            size={17}
-                            className="spin"
-                          />
+                          <Loader2 size={17} className="spin" />
                         ) : (
                           <Trash2 size={17} />
                         )}
@@ -739,9 +739,7 @@ function Expenses() {
               <tfoot>
                 <tr>
                   <td colSpan="5">
-                    <strong>
-                      Total
-                    </strong>
+                    <strong>Total</strong>
                   </td>
 
                   <td>
@@ -758,9 +756,7 @@ function Expenses() {
         )}
       </section>
 
-      {/* =========================
-          ADD EXPENSE MODAL
-      ========================= */}
+      {/* ADD EXPENSE MODAL */}
       {showForm && (
         <div className="jesta-expenses-modal-overlay">
           <div className="jesta-expenses-modal">
@@ -772,9 +768,7 @@ function Expenses() {
 
                 <div>
                   <h3>Add Expense</h3>
-                  <p>
-                    Record a new business expense.
-                  </p>
+                  <p>Record a new business expense.</p>
                 </div>
               </div>
 
@@ -802,9 +796,7 @@ function Expenses() {
                     value={formData.category_id}
                     onChange={handleChange}
                   >
-                    <option value="">
-                      Select category
-                    </option>
+                    <option value="">Select category</option>
 
                     {categories.map((category) => (
                       <option
@@ -942,10 +934,7 @@ function Expenses() {
                   >
                     {saving ? (
                       <>
-                        <Loader2
-                          size={18}
-                          className="spin"
-                        />
+                        <Loader2 size={18} className="spin" />
                         Saving...
                       </>
                     ) : (

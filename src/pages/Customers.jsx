@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
 import {
   Users,
   Plus,
@@ -18,7 +25,6 @@ import { supabase } from "../lib/supabase";
 
 function Customers() {
   const [customers, setCustomers] = useState([]);
-
   const [searchTerm, setSearchTerm] = useState("");
 
   const [showModal, setShowModal] = useState(false);
@@ -39,43 +45,100 @@ function Customers() {
     credit_limit: "",
   });
 
-  useEffect(() => {
-    loadCustomers();
-  }, []);
-
-  const loadCustomers = async () => {
+  // Used by refresh, save and deactivate actions.
+  const loadCustomers = useCallback(async () => {
     setLoading(true);
     setErrorMessage("");
 
-    const { data, error } = await supabase
-      .from("customers")
-      .select(`
-        id,
-        name,
-        phone,
-        email,
-        address,
-        tax_number,
-        credit_limit,
-        current_balance,
-        is_active,
-        created_at,
-        updated_at
-      `)
-      .eq("is_active", true)
-      .order("name", { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from("customers")
+        .select(`
+          id,
+          name,
+          phone,
+          email,
+          address,
+          tax_number,
+          credit_limit,
+          current_balance,
+          is_active,
+          created_at,
+          updated_at
+        `)
+        .eq("is_active", true)
+        .order("name", { ascending: true });
 
-    if (error) {
+      if (error) {
+        setErrorMessage(
+          `Could not load customers: ${error.message}`
+        );
+        setCustomers([]);
+      } else {
+        setCustomers(data || []);
+      }
+    } catch (error) {
       setErrorMessage(
-        `Could not load customers: ${error.message}`
+        error.message || "Could not load customers."
       );
       setCustomers([]);
-    } else {
-      setCustomers(data || []);
+    } finally {
+      setLoading(false);
     }
+  }, []);
 
-    setLoading(false);
-  };
+  // Initial loading is handled separately so state updates
+  // happen after the Supabase request completes.
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchInitialCustomers = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("customers")
+          .select(`
+            id,
+            name,
+            phone,
+            email,
+            address,
+            tax_number,
+            credit_limit,
+            current_balance,
+            is_active,
+            created_at,
+            updated_at
+          `)
+          .eq("is_active", true)
+          .order("name", { ascending: true });
+
+        if (error) {
+          throw error;
+        }
+
+        if (isMounted) {
+          setCustomers(data || []);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(
+            error.message || "Could not load customers."
+          );
+          setCustomers([]);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchInitialCustomers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const filteredCustomers = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -371,6 +434,7 @@ function Customers() {
           <div className="jesta-customers-alert-icon">
             <X size={17} />
           </div>
+
           <span>{errorMessage}</span>
 
           <button
@@ -387,6 +451,7 @@ function Customers() {
           <div className="jesta-customers-alert-icon">
             <UserCheck size={17} />
           </div>
+
           <span>{successMessage}</span>
 
           <button

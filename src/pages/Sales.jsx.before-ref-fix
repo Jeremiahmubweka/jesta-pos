@@ -1,0 +1,2881 @@
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Search,
+  Plus,
+  Minus,
+  Trash2,
+  ShoppingCart,
+  User,
+  CreditCard,
+  Banknote,
+  Smartphone,
+  CheckCircle,
+  X,
+  RefreshCw,
+  ScanBarcode,
+  Camera,
+  PauseCircle,
+  RotateCcw,
+  Clock,
+} from "lucide-react";
+import { BrowserMultiFormatReader } from "@zxing/browser";
+import { supabase } from "../lib/supabase";
+import {
+  cacheBusinessCatalog,
+  getCachedBusinessCatalog,
+} from "../lib/offline/catalog";
+import {
+  getRecord,
+  putRecord,
+  savePendingSale,
+  getBusinessRecords,
+} from "../lib/offline/database";
+import Receipt from "../components/Receipt";
+
+async function getBusinessId() {
+    const {
+      data: businessId,
+      error: businessError,
+    } = await supabase.rpc("get_my_business_id");
+
+    if (businessError) {
+      throw businessError;
+    }
+
+    if (!businessId) {
+      throw new Error(
+        "No business is associated with the current user."
+      );
+    }
+
+    return businessId;
+  }
+
+
+function Sales() {
+  const [products, setProducts] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [parkedSales, setParkedSales] = useState([]);
+  const [loadingParkedSales, setLoadingParkedSales] = useState(false);
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [barcodeInput, setBarcodeInput] = useState("");
+
+  const [cart, setCart] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState("");
+
+  const [amountPaid, setAmountPaid] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [transactionReference, setTransactionReference] = useState("");
+  const [mpesaPhoneNumber, setMpesaPhoneNumber] = useState("");
+
+  const [loading, setLoading] = useState(true);
+  const [processingSale, setProcessingSale] = useState(false);
+  const [scanningBarcode, setScanningBarcode] = useState(false);
+
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [completedSale, setCompletedSale] = useState(null);
+
+  // Offline synchronization state
+  const [pendingOfflineCount, setPendingOfflineCount] = useState(0);
+  const [syncingOfflineSales, setSyncingOfflineSales] = useState(false);
+
+  // Camera scanner state
+  const [cameraScannerOpen, setCameraScannerOpen] = useState(false);
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+
+  // Keep the current online/offline state visible to checkout.
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  const barcodeInputRef = useRef(null);
+  const lookupBarcodeAndAddToCartRef = useRef(null);
+
+  const cameraVideoRef = useRef(null);
+  const cameraControlsRef = useRef(null);
+  const barcodeReaderRef = useRef(null);
+  const cameraProcessingRef = useRef(false);
+
+  // Prevent simultaneous synchronization attempts.
+  const syncingOfflineSalesRef = useRef(false);
+
+  const formatCurrency = (amount) => {
+    return `KSh ${Number(amount || 0).toLocaleString("en-KE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  };
+
+  /*
+   * MONITOR INTERNET CONNECTION
+   */
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setSuccessMessage(
+        "Internet connection restored. JESTA is checking for pending offline sales."
+      );
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      setSuccessMessage(
+        "You are offline. Cached products are available. Cash checkout can be saved locally."
+      );
+      setErrorMessage("");
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  /*
+   * LOAD PRODUCTS AND CUSTOMERS
+   *
+   * Online:
+   * 1. Load products and customers from Supabase.
+   * 2. Cache the successful catalogue in IndexedDB.
+   * 3. Save the business ID locally for future catalogue retrieval.
+   *
+   * Offline:
+   * 1. Retrieve the previously saved business ID.
+   * 2. Load that business's cached products and customers.
+   *
+   * Local caching problems must never break normal online sales.
+   */
+  const loadSalesData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setErrorMessage("");
+
+      const [productsResult, customersResult] =
+        await Promise.all([
+          supabase
+            .from("products")
+            .select("*")
+            .eq("is_active", true)
+            .order("name", { ascending: true }),
+
+          supabase
+            .from("customers")
+            .select("*")
+            .eq("is_active", true)
+            .order("name", { ascending: true }),
+        ]);
+
+      if (productsResult.error) {
+        throw productsResult.error;
+      }
+
+      if (customersResult.error) {
+        throw customersResult.error;
+      }
+
+      const products = productsResult.data || [];
+      const customers = customersResult.data || [];
+
+      // Preserve the existing online POS behaviour.
+      setProducts(products);
+      setCustomers(customers);
+
+      /*
+       * CACHE THE SUCCESSFULLY LOADED CATALOGUE
+       *
+       * This is deliberately separate from the online queries.
+       * If local caching fails, online sales continue working.
+       */
+      try {
+        const businessId = await getBusinessId();
+
+        await cacheBusinessCatalog(
+          businessId,
+          products,
+          customers
+        );
+
+        await putRecord("metadata", {
+          key: "offline_business_id",
+          value: businessId,
+          verified_at: new Date().toISOString(),
+        });
+
+        console.log("JESTA offline catalogue updated.");
+      } catch (cacheError) {
+        console.warn(
+          "JESTA could not update the offline catalogue:",
+          cacheError
+        );
+      }
+    } catch (error) {
+      console.error("Error loading sales data:", error);
+
+      /*
+       * ONLINE LOADING FAILED.
+       * ATTEMPT TO LOAD THE LAST CACHED CATALOGUE.
+       */
+      try {
+        const savedBusiness = await getRecord(
+          "metadata",
+          "offline_business_id"
+        );
+
+        if (
+          !savedBusiness ||
+          savedBusiness.value === undefined ||
+          savedBusiness.value === null
+        ) {
+          throw new Error(
+            "No previously cached business catalogue is available on this device.",
+            { cause: error }
+          );
+        }
+
+        const cachedCatalog = await getCachedBusinessCatalog(
+          savedBusiness.value
+        );
+
+        setProducts(cachedCatalog.products || []);
+        setCustomers(cachedCatalog.customers || []);
+
+        setErrorMessage(
+          "Offline catalogue loaded. Product and stock information may be outdated. Cash sales can be saved locally."
+        );
+      } catch (offlineError) {
+        console.error(
+          "Could not load offline catalogue:",
+          offlineError
+        );
+
+        setErrorMessage(
+          offlineError.message ||
+            error.message ||
+            "Failed to load sales data."
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+
+  /*
+   * GET THE CURRENT USER'S BUSINESS
+   */
+
+  /*
+   * ---------------------------------------------------------
+   * SYNCHRONIZE PENDING OFFLINE SALES
+   * ---------------------------------------------------------
+   *
+   * This function runs when:
+   * 1. The Sales workspace finishes loading while online.
+   * 2. The internet connection returns.
+   *
+   * Each transaction is sent using its original
+   * client_transaction_id.
+   *
+   * The Supabase function uses that ID to prevent duplicate
+   * sales when a request is retried.
+   */
+  const syncPendingOfflineSales = useCallback(async () => {
+    if (!navigator.onLine) {
+      return;
+    }
+
+    if (syncingOfflineSalesRef.current) {
+      return;
+    }
+
+    syncingOfflineSalesRef.current = true;
+    setSyncingOfflineSales(true);
+
+    let successfullySynced = 0;
+
+    try {
+      const businessId = await getBusinessId();
+
+      const localSales = await getBusinessRecords(
+        "pending_sales",
+        businessId
+      );
+
+      const unsynchronizedSales = (localSales || []).filter(
+        (sale) => sale.sync_status !== "synced"
+      );
+
+      setPendingOfflineCount(unsynchronizedSales.length);
+
+      if (unsynchronizedSales.length === 0) {
+        return;
+      }
+
+      console.log(
+        `JESTA found ${unsynchronizedSales.length} offline sale(s) awaiting synchronization.`
+      );
+
+      for (const sale of unsynchronizedSales) {
+        if (!navigator.onLine) {
+          break;
+        }
+
+        // Conflicts require attention and should not be retried automatically.
+        if (sale.sync_status === "conflict") {
+          continue;
+        }
+
+        try {
+          /*
+           * MARK THE LOCAL TRANSACTION AS SYNCING.
+           */
+          await putRecord("pending_sales", {
+            ...sale,
+            sync_status: "syncing",
+            last_sync_attempt_at: new Date().toISOString(),
+          });
+
+          /*
+           * SEND THE ORIGINAL SALE TO SUPABASE.
+           */
+          const { data, error } = await supabase.rpc(
+            "sync_offline_sale",
+            {
+              p_business_id: sale.business_id,
+              p_client_transaction_id:
+                sale.client_transaction_id,
+              p_sale_number: sale.sale_number,
+              p_customer_id: sale.customer_id || null,
+              p_items: sale.items,
+              p_amount_paid: sale.amount_paid,
+              p_expected_total: sale.total_amount,
+              p_tax_amount: sale.tax_amount || 0,
+              p_discount_amount: sale.discount_amount || 0,
+              p_notes: "Offline cash sale synchronized",
+            }
+          );
+
+          if (error) {
+            throw error;
+          }
+
+          /*
+           * SUPABASE RETURNS JSONB.
+           */
+          const syncResult =
+            typeof data === "string" ? JSON.parse(data) : data;
+
+          if (
+            !syncResult ||
+            !syncResult.sale_id
+          ) {
+            throw new Error(
+              "Supabase did not return a confirmed sale ID."
+            );
+          }
+
+          /*
+           * MARK THE LOCAL TRANSACTION AS SYNCHRONIZED.
+           */
+          await putRecord("pending_sales", {
+            ...sale,
+            status: "completed",
+            sync_status: "synced",
+            server_sale_id: syncResult.sale_id,
+            synced_at: new Date().toISOString(),
+            sync_error: null,
+          });
+
+          successfullySynced += 1;
+
+          /*
+           * UPDATE THE VISIBLE RECEIPT IF IT BELONGS
+           * TO THE TRANSACTION THAT WAS JUST SYNCHRONIZED.
+           */
+          setCompletedSale((currentSale) => {
+            if (
+              !currentSale ||
+              currentSale.client_transaction_id !==
+                sale.client_transaction_id
+            ) {
+              return currentSale;
+            }
+
+            return {
+              ...currentSale,
+              id: syncResult.sale_id,
+              server_sale_id: syncResult.sale_id,
+              status: "completed",
+              sync_status: "synced",
+              synced_at: new Date().toISOString(),
+            };
+          });
+
+          console.log(
+            `Offline sale ${sale.sale_number} synchronized successfully.`,
+            syncResult
+          );
+        } catch (saleError) {
+          console.error(
+            `Could not synchronize offline sale ${sale.sale_number}:`,
+            saleError
+          );
+
+          const message =
+            saleError?.message ||
+            "Unknown synchronization error.";
+
+          /*
+           * IDENTIFY ERRORS THAT REQUIRE MANUAL ATTENTION.
+           *
+           * Examples:
+           * - Product price changed.
+           * - Insufficient stock.
+           * - Product is no longer active.
+           * - Customer no longer exists.
+           * - Sale totals do not match.
+           */
+          const conflictKeywords = [
+            "price",
+            "stock",
+            "customer",
+            "product",
+            "total",
+            "amount",
+            "duplicate",
+            "invalid",
+            "inactive",
+            "not found",
+            "does not exist",
+          ];
+
+          const isConflict = conflictKeywords.some((keyword) =>
+            message.toLowerCase().includes(keyword)
+          );
+
+          /*
+           * RESTORE THE LOCAL RECORD.
+           *
+           * A temporary network failure remains pending.
+           * A business/data conflict is marked for attention.
+           */
+          await putRecord("pending_sales", {
+            ...sale,
+            status: "pending",
+            sync_status: isConflict ? "conflict" : "pending",
+            sync_error: message,
+            last_sync_attempt_at: new Date().toISOString(),
+          });
+
+          /*
+           * SAVE CONFLICT DETAILS FOR FUTURE REVIEW.
+           */
+          if (isConflict) {
+            try {
+              await putRecord("sync_conflicts", {
+                id: `${sale.business_id}-${sale.client_transaction_id}`,
+                business_id: sale.business_id,
+                client_transaction_id:
+                  sale.client_transaction_id,
+                sale_number: sale.sale_number,
+                error_message: message,
+                created_at: new Date().toISOString(),
+                resolved: false,
+              });
+            } catch (conflictSaveError) {
+              console.error(
+                "Could not save offline synchronization conflict:",
+                conflictSaveError
+              );
+            }
+          } else {
+            /*
+             * A likely connection or temporary server failure:
+             * stop this batch and retry when the connection
+             * is available again.
+             */
+            if (!navigator.onLine) {
+              break;
+            }
+
+            break;
+          }
+        }
+      }
+
+      /*
+       * REFRESH THE LOCAL UNSYNCHRONIZED COUNT.
+       */
+      const refreshedSales = await getBusinessRecords(
+        "pending_sales",
+        businessId
+      );
+
+      const remainingSales = (refreshedSales || []).filter(
+        (sale) => sale.sync_status !== "synced"
+      );
+
+      setPendingOfflineCount(remainingSales.length);
+
+      if (successfullySynced > 0) {
+        setSuccessMessage(
+          `${successfullySynced} offline cash sale${successfullySynced === 1 ? "" : "s"} successfully synchronized with JESTA.`
+        );
+
+        /*
+         * Refresh product stock after confirmed synchronization.
+         */
+        await loadSalesData();
+      }
+
+      if (
+        remainingSales.some(
+          (sale) => sale.sync_status === "conflict"
+        )
+      ) {
+        setErrorMessage(
+          "Some offline sales need attention before they can be synchronized. Their records remain safely stored on this device."
+        );
+      }
+    } catch (error) {
+      console.error(
+        "JESTA offline synchronization error:",
+        error
+      );
+
+      if (navigator.onLine) {
+        setErrorMessage(
+          error.message ||
+            "Could not synchronize offline sales. They remain saved on this device."
+        );
+      }
+    } finally {
+      syncingOfflineSalesRef.current = false;
+      setSyncingOfflineSales(false);
+    }
+  }, [loadSalesData]);
+
+
+  /*
+   * AUTOMATICALLY CHECK FOR OFFLINE SALES
+   *
+   * Wait until the Sales workspace has finished its initial
+   * loading before attempting synchronization.
+   */
+  useEffect(() => {
+    if (!isOnline || loading) {
+      return;
+    }
+
+    const syncTimer = window.setTimeout(() => {
+      void syncPendingOfflineSales();
+    }, 0);
+
+    return () => window.clearTimeout(syncTimer);
+  }, [isOnline, loading, syncPendingOfflineSales]);
+
+  /*
+   * LOAD PARKED SALES
+   */
+  const loadParkedSales = useCallback(async () => {
+    try {
+      setLoadingParkedSales(true);
+
+      const businessId = await getBusinessId();
+
+      const { data, error } = await supabase
+        .from("parked_sales")
+        .select("*")
+        .eq("business_id", businessId)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      setParkedSales(data || []);
+    } catch (error) {
+      console.error("Error loading parked sales:", error);
+
+      // A failure to load held sales must not prevent offline checkout.
+      if (navigator.onLine) {
+        setErrorMessage(
+          error.message || "Failed to load parked sales."
+        );
+      }
+    } finally {
+      setLoadingParkedSales(false);
+    }
+  }, []);
+
+
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => {
+      void loadSalesData();
+      void loadParkedSales();
+      barcodeInputRef.current?.focus();
+    }, 0);
+
+    return () => window.clearTimeout(loadTimer);
+  }, [loadSalesData, loadParkedSales]);
+
+  /*
+   * STOP THE CAMERA SCANNER COMPLETELY
+   */
+  const stopCameraScanner = () => {
+    try {
+      if (cameraControlsRef.current) {
+        cameraControlsRef.current.stop();
+      }
+    } catch (error) {
+      console.warn("Camera stop warning:", error);
+    }
+
+    cameraControlsRef.current = null;
+    barcodeReaderRef.current = null;
+    cameraProcessingRef.current = false;
+
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.pause();
+      cameraVideoRef.current.srcObject = null;
+    }
+
+    setCameraLoading(false);
+  };
+
+  /*
+   * CLOSE THE CAMERA SCANNER MODAL
+   */
+  const closeCameraScanner = () => {
+    stopCameraScanner();
+    setCameraError("");
+    setCameraScannerOpen(false);
+
+    setTimeout(() => {
+      barcodeInputRef.current?.focus();
+    }, 100);
+  };
+
+  /*
+   * START THE CAMERA WHEN THE SCANNER MODAL OPENS
+   */
+  useEffect(() => {
+    if (!cameraScannerOpen) {
+      return;
+    }
+
+    let cancelled = false;
+    const videoElement = cameraVideoRef.current;
+
+    const startCamera = async () => {
+      try {
+        setCameraLoading(true);
+        setCameraError("");
+        cameraProcessingRef.current = false;
+
+        await new Promise((resolve) => {
+          setTimeout(resolve, 150);
+        });
+
+        if (cancelled || !videoElement) {
+          return;
+        }
+
+        const reader = new BrowserMultiFormatReader();
+
+        barcodeReaderRef.current = reader;
+
+        const constraints = {
+          video: {
+            facingMode: {
+              ideal: "environment",
+            },
+            width: {
+              ideal: 1280,
+            },
+            height: {
+              ideal: 720,
+            },
+          },
+          audio: false,
+        };
+
+        const controls = await reader.decodeFromConstraints(
+          constraints,
+          videoElement,
+          (result, error) => {
+            if (cancelled) {
+              return;
+            }
+
+            if (result) {
+              const scannedValue = result.getText();
+
+              if (
+                scannedValue &&
+                scannedValue.trim() &&
+                !cameraProcessingRef.current
+              ) {
+                cameraProcessingRef.current = true;
+
+                try {
+                  cameraControlsRef.current?.stop();
+                } catch (stopError) {
+                  console.warn(
+                    "Camera stop warning:",
+                    stopError
+                  );
+                }
+
+                cameraControlsRef.current = null;
+
+                setCameraScannerOpen(false);
+                setCameraLoading(false);
+
+                lookupBarcodeAndAddToCartRef.current?.(scannedValue);
+              }
+            }
+
+            void error;
+          }
+        );
+
+        if (cancelled) {
+          controls.stop();
+          return;
+        }
+
+        cameraControlsRef.current = controls;
+        setCameraLoading(false);
+      } catch (error) {
+        console.error("Camera start error:", error);
+
+        if (cancelled) {
+          return;
+        }
+
+        setCameraLoading(false);
+
+        let message =
+          "Unable to start the camera. Please use the barcode input instead.";
+
+        if (
+          error?.name === "NotAllowedError" ||
+          error?.message?.toLowerCase().includes("permission")
+        ) {
+          message =
+            "Camera permission was denied. Please allow camera access in your browser settings and try again.";
+        } else if (
+          error?.name === "NotFoundError" ||
+          error?.message?.toLowerCase().includes("camera")
+        ) {
+          message =
+            "No camera was found on this device. Please use the barcode input instead.";
+        } else if (error?.name === "NotReadableError") {
+          message =
+            "The camera is currently being used by another application. Close other camera apps and try again.";
+        } else if (
+          window.location.protocol !== "https:" &&
+          window.location.hostname !== "localhost" &&
+          window.location.hostname !== "127.0.0.1"
+        ) {
+          message =
+            "Camera access requires a secure HTTPS connection. Please open the live JESTA POS website using HTTPS.";
+        }
+
+        setCameraError(message);
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      cancelled = true;
+
+      try {
+        cameraControlsRef.current?.stop();
+      } catch (error) {
+        console.warn("Camera cleanup warning:", error);
+      }
+
+      cameraControlsRef.current = null;
+      barcodeReaderRef.current = null;
+      cameraProcessingRef.current = false;
+
+      if (videoElement) {
+        videoElement.pause();
+        videoElement.srcObject = null;
+      }
+    };
+  }, [cameraScannerOpen]);
+
+  /*
+   * ADD A SCANNED BARCODE TO THE CART
+   *
+   * Online:
+   * Try Supabase first.
+   *
+   * Offline or online lookup failure:
+   * Search the products already loaded into the local catalogue.
+   */
+  const lookupBarcodeAndAddToCart = async (barcodeValue) => {
+    const barcode = String(barcodeValue || "").trim();
+
+    if (!barcode) {
+      return;
+    }
+
+    try {
+      setScanningBarcode(true);
+      setErrorMessage("");
+      setSuccessMessage("");
+
+      let product = null;
+
+      /*
+       * FIRST ATTEMPT: ONLINE BARCODE LOOKUP
+       */
+      if (navigator.onLine) {
+        try {
+          const { data, error } = await supabase
+            .from("products")
+            .select("*")
+            .eq("barcode", barcode)
+            .eq("is_active", true)
+            .maybeSingle();
+
+          if (error) {
+            throw error;
+          }
+
+          product = data;
+        } catch (onlineLookupError) {
+          console.warn(
+            "Online barcode lookup failed; checking cached products:",
+            onlineLookupError
+          );
+        }
+      }
+
+      /*
+       * SECOND ATTEMPT: LOCAL CATALOGUE LOOKUP
+       */
+      if (!product) {
+        product =
+          products.find(
+            (item) =>
+              String(item.barcode || "").trim() === barcode &&
+              item.is_active !== false
+          ) || null;
+      }
+
+      if (!product) {
+        setErrorMessage(
+          `No active product found for barcode: ${barcode}`
+        );
+        return;
+      }
+
+      addToCart(product);
+      setBarcodeInput("");
+    } catch (error) {
+      console.error("Barcode lookup error:", error);
+
+      setErrorMessage(
+        error.message || "Failed to scan barcode."
+      );
+    } finally {
+      setScanningBarcode(false);
+      cameraProcessingRef.current = false;
+
+      setTimeout(() => {
+        barcodeInputRef.current?.focus();
+      }, 100);
+    }
+  };
+
+  lookupBarcodeAndAddToCartRef.current = lookupBarcodeAndAddToCart;
+
+  /*
+   * FILTER PRODUCTS
+   */
+  const filteredProducts = useMemo(() => {
+    const search = searchTerm.trim().toLowerCase();
+
+    if (!search) {
+      return products;
+    }
+
+    return products.filter((product) => {
+      const name = String(product.name || "").toLowerCase();
+      const sku = String(product.sku || "").toLowerCase();
+      const barcode = String(product.barcode || "").toLowerCase();
+
+      return (
+        name.includes(search) ||
+        sku.includes(search) ||
+        barcode.includes(search)
+      );
+    });
+  }, [products, searchTerm]);
+
+  /*
+   * CALCULATE TOTALS
+   */
+  const subtotal = useMemo(() => {
+    return cart.reduce(
+      (totalAmount, item) =>
+        totalAmount +
+        Number(item.selling_price || 0) *
+          Number(item.quantity || 0),
+      0
+    );
+  }, [cart]);
+
+  const tax = 0;
+  const discount = 0;
+
+  const total = Math.max(subtotal + tax - discount, 0);
+
+  const paid = Number(amountPaid) || 0;
+
+  const change = Math.max(paid - total, 0);
+  const balance = Math.max(total - paid, 0);
+
+  /*
+   * ADD PRODUCT TO CART
+   */
+  const addToCart = (product) => {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const stock = Number(product.stock_quantity || 0);
+
+    if (stock <= 0) {
+      setErrorMessage(`${product.name} is out of stock.`);
+      return;
+    }
+
+    setCart((currentCart) => {
+      const existingItem = currentCart.find(
+        (item) => String(item.id) === String(product.id)
+      );
+
+      if (existingItem) {
+        if (Number(existingItem.quantity) >= stock) {
+          setErrorMessage(
+            `Only ${stock} unit${stock === 1 ? "" : "s"} of ${product.name} available.`
+          );
+
+          return currentCart;
+        }
+
+        return currentCart.map((item) =>
+          String(item.id) === String(product.id)
+            ? {
+                ...item,
+                quantity: Number(item.quantity) + 1,
+              }
+            : item
+        );
+      }
+
+      return [
+        ...currentCart,
+        {
+          ...product,
+          quantity: 1,
+        },
+      ];
+    });
+  };
+
+  const handleBarcodeScan = async (event) => {
+    event.preventDefault();
+
+    const barcode = barcodeInput.trim();
+
+    if (!barcode) {
+      return;
+    }
+
+    await lookupBarcodeAndAddToCart(barcode);
+  };
+
+  /*
+   * UPDATE PRODUCT QUANTITY
+   */
+  const updateQuantity = (productId, changeAmount) => {
+    setErrorMessage("");
+
+    setCart((currentCart) =>
+      currentCart
+        .map((item) => {
+          if (String(item.id) !== String(productId)) {
+            return item;
+          }
+
+          const stock = Number(item.stock_quantity || 0);
+          const newQuantity =
+            Number(item.quantity) + changeAmount;
+
+          if (newQuantity <= 0) {
+            return null;
+          }
+
+          if (newQuantity > stock) {
+            setErrorMessage(
+              `Only ${stock} unit${stock === 1 ? "" : "s"} of ${item.name} available.`
+            );
+
+            return item;
+          }
+
+          return {
+            ...item,
+            quantity: newQuantity,
+          };
+        })
+        .filter(Boolean)
+    );
+  };
+
+  /*
+   * REMOVE PRODUCT FROM CART
+   */
+  const removeFromCart = (productId) => {
+    setCart((currentCart) =>
+      currentCart.filter(
+        (item) => String(item.id) !== String(productId)
+      )
+    );
+  };
+
+  /*
+   * RESET THE CURRENT SALE
+   */
+  const resetCurrentSale = () => {
+    setCart([]);
+    setAmountPaid("");
+    setSelectedCustomer("");
+    setTransactionReference("");
+    setMpesaPhoneNumber("");
+    setPaymentMethod("cash");
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    setTimeout(() => {
+      barcodeInputRef.current?.focus();
+    }, 100);
+  };
+
+  /*
+   * CLEAR THE CURRENT CART
+   */
+  const clearCart = () => {
+    if (
+      cart.length > 0 &&
+      !window.confirm("Clear the current cart?")
+    ) {
+      return;
+    }
+
+    resetCurrentSale();
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * SAVE OFFLINE CASH SALE
+   * ---------------------------------------------------------
+   *
+   * Offline sales are stored in IndexedDB.
+   * They are NOT yet confirmed by Supabase.
+   *
+   * Only cash payments are supported offline.
+   * Card and M-Pesa remain online-only.
+   */
+  const handleOfflineCashSale = async () => {
+    if (paymentMethod !== "cash") {
+      throw new Error(
+        "Only cash payments are available while offline. Reconnect to process card or M-Pesa payments."
+      );
+    }
+
+    if (cart.length === 0) {
+      throw new Error(
+        "Please add at least one product to the cart."
+      );
+    }
+
+    if (total <= 0) {
+      throw new Error("Sale total must be greater than zero.");
+    }
+
+    if (paid < total) {
+      throw new Error(
+        `Insufficient payment. Customer still owes ${formatCurrency(
+          total - paid
+        )}.`
+      );
+    }
+
+    /*
+     * USE THE BUSINESS ID SAVED DURING THE LAST
+     * SUCCESSFUL ONLINE CATALOGUE LOAD.
+     */
+    const savedBusiness = await getRecord(
+      "metadata",
+      "offline_business_id"
+    );
+
+    const businessId = savedBusiness?.value;
+
+    if (!businessId) {
+      throw new Error(
+        "JESTA cannot identify this business offline. Reconnect to the internet, open the sales workspace and try again."
+      );
+    }
+
+    /*
+     * GENERATE A UNIQUE LOCAL TRANSACTION ID.
+     */
+    const clientTransactionId =
+      globalThis.crypto?.randomUUID?.() ||
+      `JESTA-${businessId}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`;
+
+    const saleNumber = `OFFLINE-${businessId}-${Date.now()}`;
+
+    const customer =
+      customers.find(
+        (item) => String(item.id) === String(selectedCustomer)
+      ) || null;
+
+    /*
+     * SAVE THE PRODUCT DETAILS AND PRICE SNAPSHOTS.
+     *
+     * The server synchronization process must validate
+     * these prices against current server prices.
+     */
+    const offlineItems = cart.map((item) => ({
+      product_id: item.id,
+      name: item.name,
+      sku: item.sku || null,
+      barcode: item.barcode || null,
+      quantity: Number(item.quantity),
+      selling_price: Number(item.selling_price),
+      line_total:
+        Number(item.selling_price) * Number(item.quantity),
+    }));
+
+    const pendingSale = {
+      client_transaction_id: clientTransactionId,
+      business_id: businessId,
+      sale_number: saleNumber,
+
+      customer_id: selectedCustomer
+        ? Number(selectedCustomer)
+        : null,
+
+      customer_name: customer?.name || "Walk-in Customer",
+
+      items: offlineItems,
+
+      subtotal,
+      tax_amount: tax,
+      discount_amount: discount,
+      total_amount: total,
+      amount_paid: paid,
+      change_amount: change,
+      balance_due: 0,
+
+      payment_method: "cash",
+
+      transaction_reference:
+        transactionReference.trim() || null,
+
+      created_at: new Date().toISOString(),
+
+      status: "pending",
+      sync_status: "pending",
+    };
+
+    /*
+     * SAVE FIRST.
+     *
+     * If IndexedDB fails, the cart remains untouched.
+     */
+    await savePendingSale(pendingSale);
+
+    setPendingOfflineCount((current) => current + 1);
+
+    /*
+     * CREATE THE LOCAL RECEIPT.
+     *
+     * This is not a server-confirmed sale.
+     */
+    const receiptSale = {
+      id: clientTransactionId,
+      client_transaction_id: clientTransactionId,
+      sale_number: saleNumber,
+      created_at: pendingSale.created_at,
+      customer_name: pendingSale.customer_name,
+
+      subtotal,
+      tax_amount: tax,
+      discount_amount: discount,
+      total_amount: total,
+      amount_paid: paid,
+      change_amount: change,
+      balance_amount: 0,
+
+      payment_method: "cash",
+
+      transaction_reference:
+        pendingSale.transaction_reference,
+
+      sync_status: "pending",
+      status: "pending",
+
+      items: offlineItems,
+    };
+
+    setCompletedSale(receiptSale);
+
+    setSuccessMessage(
+      `Cash sale ${saleNumber} saved on this device. It is awaiting synchronization with JESTA.`
+    );
+
+    /*
+     * CLEAR THE CART ONLY AFTER THE LOCAL SAVE SUCCEEDS.
+     */
+    setCart([]);
+    setAmountPaid("");
+    setSelectedCustomer("");
+    setTransactionReference("");
+    setMpesaPhoneNumber("");
+    setPaymentMethod("cash");
+
+    setTimeout(() => {
+      barcodeInputRef.current?.focus();
+    }, 200);
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * PARK THE CURRENT SALE
+   * ---------------------------------------------------------
+   *
+   * Parking stores an unfinished order.
+   * It does NOT complete a sale, deduct stock, or initiate
+   * an M-Pesa payment.
+   */
+  const parkCurrentSale = async () => {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (cart.length === 0) {
+      setErrorMessage("Add products before parking a sale.");
+      return;
+    }
+
+    if (!navigator.onLine) {
+      setErrorMessage(
+        "Holding a sale requires an internet connection. Offline held-sale storage has not yet been implemented."
+      );
+      return;
+    }
+
+    try {
+      setProcessingSale(true);
+
+      const businessId = await getBusinessId();
+
+      const customerName =
+        customers.find(
+          (customer) =>
+            String(customer.id) === String(selectedCustomer)
+        )?.name || "Walk-in Customer";
+
+      const parkedItems = cart.map((item) => ({
+        ...item,
+        quantity: Number(item.quantity),
+      }));
+
+      const { data, error } = await supabase
+        .from("parked_sales")
+        .insert({
+          business_id: businessId,
+          sale_number: `PARKED-${Date.now()}`,
+          customer_id: selectedCustomer
+            ? Number(selectedCustomer)
+            : null,
+          customer_name: customerName,
+          items: parkedItems,
+          subtotal,
+          tax_amount: tax,
+          discount_amount: discount,
+          total_amount: total,
+          payment_method: paymentMethod,
+          transaction_reference:
+            transactionReference.trim() || null,
+          mpesa_phone_number:
+            mpesaPhoneNumber.trim() || null,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      setParkedSales((current) => [data, ...current]);
+
+      resetCurrentSale();
+
+      setSuccessMessage(
+        `Sale parked successfully for ${customerName}.`
+      );
+    } catch (error) {
+      console.error("Error parking sale:", error);
+
+      setErrorMessage(
+        error.message || "Failed to park this sale."
+      );
+    } finally {
+      setProcessingSale(false);
+    }
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * RESUME A PARKED SALE
+   * ---------------------------------------------------------
+   */
+  const resumeParkedSale = async (parkedSale) => {
+    if (processingSale) {
+      return;
+    }
+
+    if (
+      cart.length > 0 &&
+      !window.confirm(
+        "Your current cart contains products. Resuming this parked sale will replace the current cart. Continue?"
+      )
+    ) {
+      return;
+    }
+
+    const savedItems = Array.isArray(parkedSale.items)
+      ? parkedSale.items
+      : [];
+
+    if (savedItems.length === 0) {
+      setErrorMessage(
+        "This parked sale has no saved products and cannot be resumed."
+      );
+      return;
+    }
+
+    try {
+      setProcessingSale(true);
+      setErrorMessage("");
+      setSuccessMessage("");
+
+      setCart(
+        savedItems.map((item) => ({
+          ...item,
+          quantity: Number(item.quantity || 0),
+        }))
+      );
+
+      setSelectedCustomer(
+        parkedSale.customer_id
+          ? String(parkedSale.customer_id)
+          : ""
+      );
+
+      setPaymentMethod(parkedSale.payment_method || "cash");
+
+      setTransactionReference(
+        parkedSale.transaction_reference || ""
+      );
+
+      setMpesaPhoneNumber(
+        parkedSale.mpesa_phone_number || ""
+      );
+
+      setAmountPaid("");
+
+      const { error } = await supabase
+        .from("parked_sales")
+        .delete()
+        .eq("id", parkedSale.id)
+        .eq("business_id", parkedSale.business_id);
+
+      if (error) {
+        console.error(
+          "Could not remove resumed parked sale:",
+          error
+        );
+
+        await loadParkedSales();
+
+        setSuccessMessage(
+          "Sale restored. The parked copy could not be removed. Refresh Held Sales and check for a duplicate before resuming it again."
+        );
+
+        return;
+      }
+
+      setParkedSales((current) =>
+        current.filter(
+          (sale) => String(sale.id) !== String(parkedSale.id)
+        )
+      );
+
+      setSuccessMessage(
+        `Sale for ${parkedSale.customer_name || "Walk-in Customer"} resumed. Confirm stock and payment details before completing it.`
+      );
+
+      setTimeout(() => {
+        barcodeInputRef.current?.focus();
+      }, 100);
+    } catch (error) {
+      console.error("Error resuming parked sale:", error);
+
+      setErrorMessage(
+        error.message || "Failed to resume parked sale."
+      );
+    } finally {
+      setProcessingSale(false);
+    }
+  };
+
+  /*
+   * DELETE A PARKED SALE
+   */
+  const deleteParkedSale = async (parkedSale) => {
+    if (processingSale) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Permanently delete the parked sale for ${parkedSale.customer_name || "Walk-in Customer"}?`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setErrorMessage("");
+      setSuccessMessage("");
+
+      const { error } = await supabase
+        .from("parked_sales")
+        .delete()
+        .eq("id", parkedSale.id)
+        .eq("business_id", parkedSale.business_id);
+
+      if (error) {
+        throw error;
+      }
+
+      setParkedSales((current) =>
+        current.filter(
+          (sale) => String(sale.id) !== String(parkedSale.id)
+        )
+      );
+
+      setSuccessMessage("Parked sale deleted.");
+    } catch (error) {
+      console.error("Error deleting parked sale:", error);
+
+      setErrorMessage(
+        error.message || "Failed to delete parked sale."
+      );
+    }
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * WAIT FOR M-PESA CALLBACK
+   * ---------------------------------------------------------
+   */
+  const waitForMpesaPayment = async (checkoutRequestId) => {
+    const maxAttempts = 60;
+
+    for (
+      let attempt = 1;
+      attempt <= maxAttempts;
+      attempt += 1
+    ) {
+      const { data: transaction, error } = await supabase
+        .from("mpesa_transactions")
+        .select("*")
+        .eq("checkout_request_id", checkoutRequestId)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      if (transaction) {
+        if (transaction.status === "SUCCESS") {
+          return transaction;
+        }
+
+        if (transaction.status === "FAILED") {
+          throw new Error(
+            transaction.result_description ||
+              "The M-Pesa payment was not completed."
+          );
+        }
+
+        if (transaction.status === "PROCESSING_ERROR") {
+          throw new Error(
+            "The M-Pesa payment was received, but JESTA could not complete the sale. Please contact the administrator before attempting the payment again."
+          );
+        }
+      }
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2000);
+      });
+    }
+
+    throw new Error(
+      "The M-Pesa payment is still pending. Please check the customer's phone and transaction status before trying again."
+    );
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * HANDLE M-PESA PAYMENT
+   * ---------------------------------------------------------
+   */
+  const handleMpesaPayment = async ({
+    businessId,
+    saleNumber,
+    saleItems,
+    customerName,
+  }) => {
+    const phone = mpesaPhoneNumber.trim();
+
+    if (!phone) {
+      throw new Error(
+        "Please enter the customer's M-Pesa phone number."
+      );
+    }
+
+    setSuccessMessage(
+      "Sending M-Pesa payment request to the customer's phone..."
+    );
+
+    const { data: mpesaResponse, error: mpesaError } =
+      await supabase.functions.invoke("mpesa-stk-push", {
+        body: {
+          phoneNumber: phone,
+          amount: total,
+          businessId,
+          saleNumber,
+          customerId: selectedCustomer
+            ? Number(selectedCustomer)
+            : null,
+          items: saleItems,
+          taxAmount: tax,
+          discountAmount: discount,
+          notes: null,
+        },
+      });
+
+    if (mpesaError) {
+      console.error("M-Pesa Edge Function error:", mpesaError);
+
+      throw new Error(
+        mpesaError.message ||
+          "Failed to send the M-Pesa payment request."
+      );
+    }
+
+    if (!mpesaResponse || !mpesaResponse.success) {
+      throw new Error(
+        mpesaResponse?.error ||
+          "M-Pesa payment request could not be started."
+      );
+    }
+
+    const checkoutRequestId =
+      mpesaResponse?.transaction?.checkoutRequestId ||
+      mpesaResponse?.data?.CheckoutRequestID;
+
+    if (!checkoutRequestId) {
+      throw new Error(
+        "M-Pesa started successfully, but no Checkout Request ID was returned."
+      );
+    }
+
+    setSuccessMessage(
+      `M-Pesa prompt sent to ${phone}. Please ask the customer to enter their M-Pesa PIN.`
+    );
+
+    const transaction =
+      await waitForMpesaPayment(checkoutRequestId);
+
+    const receiptSale = {
+      id: transaction.sale_id,
+      sale_number: transaction.sale_number || saleNumber,
+      created_at: new Date().toISOString(),
+      customer_name: customerName,
+      subtotal,
+      tax_amount: Number(transaction.tax_amount || tax),
+      discount_amount: Number(
+        transaction.discount_amount || discount
+      ),
+      total_amount: Number(transaction.amount || total),
+      amount_paid: Number(transaction.amount || total),
+      change_amount: 0,
+      balance_amount: 0,
+      payment_method: "mpesa",
+      transaction_reference:
+        transaction.mpesa_receipt_number || null,
+      items: cart.map((item) => ({
+        ...item,
+        line_total:
+          Number(item.selling_price || 0) *
+          Number(item.quantity || 0),
+      })),
+    };
+
+    setCompletedSale(receiptSale);
+
+    setSuccessMessage(
+      `M-Pesa payment received successfully. Sale ${saleNumber} completed.`
+    );
+
+    setCart([]);
+    setAmountPaid("");
+    setSelectedCustomer("");
+    setTransactionReference("");
+    setMpesaPhoneNumber("");
+    setPaymentMethod("cash");
+
+    await loadSalesData();
+
+    setTimeout(() => {
+      barcodeInputRef.current?.focus();
+    }, 200);
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * COMPLETE SALE
+   * ---------------------------------------------------------
+   */
+  const handleCompleteSale = async () => {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    /*
+     * OFFLINE CHECKOUT
+     *
+     * Only cash is accepted offline.
+     * Card and M-Pesa must use their online payment flows.
+     */
+    if (!navigator.onLine) {
+      if (paymentMethod !== "cash") {
+        setErrorMessage(
+          "Card and M-Pesa payments require an internet connection. Switch to cash or reconnect before completing this sale."
+        );
+        return;
+      }
+
+      try {
+        setProcessingSale(true);
+
+        await handleOfflineCashSale();
+
+        return;
+      } catch (error) {
+        console.error("Offline cash sale error:", error);
+
+        setErrorMessage(
+          error.message || "Could not save the offline sale."
+        );
+
+        return;
+      } finally {
+        setProcessingSale(false);
+      }
+    }
+
+    if (cart.length === 0) {
+      setErrorMessage(
+        "Please add at least one product to the cart."
+      );
+      return;
+    }
+
+    if (total <= 0) {
+      setErrorMessage("Sale total must be greater than zero.");
+      return;
+    }
+
+    if (paymentMethod !== "mpesa" && paid < total) {
+      setErrorMessage(
+        `Insufficient payment. Customer still owes ${formatCurrency(
+          total - paid
+        )}.`
+      );
+      return;
+    }
+
+    try {
+      setProcessingSale(true);
+
+      const businessId = await getBusinessId();
+      const saleNumber = `SALE-${Date.now()}`;
+
+      const saleItems = cart.map((item) => ({
+        product_id: item.id,
+        quantity: Number(item.quantity),
+      }));
+
+      const customerName =
+        customers.find(
+          (customer) =>
+            String(customer.id) === String(selectedCustomer)
+        )?.name || "Walk-in Customer";
+
+      /*
+       * M-PESA
+       */
+      if (paymentMethod === "mpesa") {
+        await handleMpesaPayment({
+          businessId,
+          saleNumber,
+          saleItems,
+          customerName,
+        });
+
+        return;
+      }
+
+      /*
+       * CASH / CARD
+       */
+      const { data: saleResult, error: saleError } =
+        await supabase.rpc("complete_sale", {
+          p_business_id: businessId,
+          p_customer_id: selectedCustomer
+            ? Number(selectedCustomer)
+            : null,
+          p_sale_number: saleNumber,
+          p_items: saleItems,
+          p_amount_paid: paid,
+          p_payment_method: paymentMethod,
+          p_transaction_reference:
+            transactionReference.trim() || null,
+          p_tax_amount: tax,
+          p_discount_amount: discount,
+          p_notes: null,
+        });
+
+      if (saleError) {
+        throw saleError;
+      }
+
+      const saleId =
+        typeof saleResult === "object" && saleResult !== null
+          ? saleResult.id || saleResult.sale_id || null
+          : saleResult;
+
+      const receiptSale = {
+        id: saleId,
+        sale_number: saleNumber,
+        created_at: new Date().toISOString(),
+        customer_name: customerName,
+        subtotal,
+        tax_amount: tax,
+        discount_amount: discount,
+        total_amount: total,
+        amount_paid: paid,
+        change_amount: change,
+        balance_amount: balance,
+        payment_method: paymentMethod,
+        transaction_reference:
+          transactionReference.trim() || null,
+        items: cart.map((item) => ({
+          ...item,
+          line_total:
+            Number(item.selling_price || 0) *
+            Number(item.quantity || 0),
+        })),
+      };
+
+      setCompletedSale(receiptSale);
+
+      setSuccessMessage(
+        `Sale ${saleNumber} completed successfully.`
+      );
+
+      setCart([]);
+      setAmountPaid("");
+      setSelectedCustomer("");
+      setTransactionReference("");
+      setMpesaPhoneNumber("");
+      setPaymentMethod("cash");
+
+      await loadSalesData();
+
+      setTimeout(() => {
+        barcodeInputRef.current?.focus();
+      }, 200);
+    } catch (error) {
+      console.error("Complete sale error:", error);
+
+      setErrorMessage(
+        error.message || "Failed to complete sale."
+      );
+    } finally {
+      setProcessingSale(false);
+    }
+  };
+
+  /*
+   * CUSTOMER CHANGE
+   */
+  const handleCustomerChange = (event) => {
+    const customerId = event.target.value;
+    setSelectedCustomer(customerId);
+
+    if (customerId) {
+      const customer = customers.find(
+        (item) => String(item.id) === String(customerId)
+      );
+
+      if (customer?.phone) {
+        setMpesaPhoneNumber(customer.phone);
+      }
+    } else {
+      setMpesaPhoneNumber("");
+    }
+  };
+
+  /*
+   * PAYMENT METHOD CHANGE
+   */
+  const handlePaymentMethodChange = (method) => {
+    setPaymentMethod(method);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (method === "mpesa") {
+      const customer = customers.find(
+        (item) => String(item.id) === String(selectedCustomer)
+      );
+
+      if (customer?.phone) {
+        setMpesaPhoneNumber(customer.phone);
+      }
+    }
+  };
+
+  /*
+   * LOADING SCREEN
+   */
+  if (loading) {
+    return (
+      <div className="jesta-sales-page">
+        <div className="jesta-loading">
+          <RefreshCw
+            className="animate-spin"
+            size={24}
+          />
+          <span>Loading sales workspace...</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="jesta-sales-page">
+      {/* CAMERA SCANNER MODAL */}
+      {cameraScannerOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-50 text-teal-700">
+                  <Camera size={20} />
+                </div>
+
+                <div>
+                  <h2 className="font-semibold text-slate-900">
+                    Scan Product Barcode
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Use your phone camera to scan
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeCameraScanner}
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                aria-label="Close camera scanner"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="bg-slate-950 p-4">
+              <div className="relative overflow-hidden rounded-xl bg-black">
+                <video
+                  ref={cameraVideoRef}
+                  className="aspect-[4/3] w-full object-cover"
+                  autoPlay
+                  muted
+                  playsInline
+                />
+
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="relative h-40 w-[78%] max-w-sm">
+                    <div className="absolute left-0 top-0 h-8 w-8 border-l-4 border-t-4 border-teal-400" />
+                    <div className="absolute right-0 top-0 h-8 w-8 border-r-4 border-t-4 border-teal-400" />
+                    <div className="absolute bottom-0 left-0 h-8 w-8 border-b-4 border-l-4 border-teal-400" />
+                    <div className="absolute bottom-0 right-0 h-8 w-8 border-b-4 border-r-4 border-teal-400" />
+                    <div className="absolute left-3 right-3 top-1/2 h-0.5 -translate-y-1/2 bg-teal-400 shadow-[0_0_12px_rgba(45,212,191,0.9)]" />
+                  </div>
+                </div>
+
+                {cameraLoading && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70">
+                    <div className="text-center text-white">
+                      <RefreshCw
+                        size={28}
+                        className="mx-auto animate-spin text-teal-400"
+                      />
+                      <p className="mt-3 text-sm font-medium">
+                        Starting camera...
+                      </p>
+                      <p className="mt-1 text-xs text-slate-300">
+                        Please allow camera access if prompted.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {cameraError && (
+                <div className="mt-4 flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-950/50 p-3 text-sm text-red-200">
+                  <X size={18} className="mt-0.5 shrink-0" />
+                  <div className="flex-1">{cameraError}</div>
+                </div>
+              )}
+
+              <div className="mt-4 text-center">
+                <p className="text-sm font-medium text-white">
+                  Point your camera at a product barcode
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Keep the barcode inside the frame until it is detected.
+                </p>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-200 bg-white p-4">
+              <button
+                type="button"
+                onClick={closeCameraScanner}
+                className="jesta-btn w-full justify-center border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                <X size={18} />
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* HEADER */}
+      <div className="jesta-sales-header mb-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="jesta-sales-brand mb-1 text-sm font-semibold uppercase tracking-wider">
+              JESTA POS
+            </div>
+            <h1 className="text-2xl font-bold">Sales</h1>
+            <p className="mt-1 text-sm text-slate-300">
+              Create sales, process payments and manage your customer transactions.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
+                isOnline
+                  ? "bg-green-100 text-green-800"
+                  : "bg-amber-100 text-amber-800"
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  isOnline ? "bg-green-600" : "bg-amber-600"
+                }`}
+              />
+              {isOnline ? "Online" : "Offline"}
+            </div>
+
+            {pendingOfflineCount > 0 && (
+              <div className="flex items-center gap-2 rounded-lg bg-amber-100 px-3 py-2 text-sm font-medium text-amber-800">
+                {syncingOfflineSales ? (
+                  <RefreshCw size={15} className="animate-spin" />
+                ) : (
+                  <Clock size={15} />
+                )}
+                {pendingOfflineCount} unsynced sale{pendingOfflineCount === 1 ? "" : "s"}
+              </div>
+            )}
+
+            <div className="jesta-sales-cart-count flex items-center gap-2 rounded-lg px-4 py-3">
+              <ShoppingCart size={20} />
+              <span className="text-sm font-medium">
+                {cart.length} item{cart.length === 1 ? "" : "s"} in cart
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* OFFLINE NOTICE */}
+      {!isOnline && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <strong>Offline mode:</strong> You are using cached product and customer information. Cash sales can be saved on this device and will require synchronization when the connection returns. Card and M-Pesa payments are unavailable offline.
+        </div>
+      )}
+
+      {/* SYNCHRONIZATION NOTICE */}
+      {isOnline && syncingOfflineSales && (
+        <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+          <RefreshCw size={18} className="animate-spin" />
+          Synchronizing saved offline cash sales with JESTA...
+        </div>
+      )}
+
+      {/* ERROR MESSAGE */}
+      {errorMessage && (
+        <div className="mb-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <X size={18} className="mt-0.5 shrink-0" />
+          <div className="flex-1">{errorMessage}</div>
+          <button
+            type="button"
+            onClick={() => setErrorMessage("")}
+            className="shrink-0"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* SUCCESS MESSAGE */}
+      {successMessage && (
+        <div className="mb-4 flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+          <CheckCircle size={18} className="mt-0.5 shrink-0" />
+          <div className="flex-1">{successMessage}</div>
+          <button
+            type="button"
+            onClick={() => setSuccessMessage("")}
+            className="shrink-0"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* COMPLETED SALE RECEIPT */}
+      {completedSale && (
+        <div className="jesta-receipt-section mb-6 rounded-xl p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-slate-900">
+                {completedSale.sync_status === "pending"
+                  ? "Offline Sale Recorded"
+                  : "Sale Completed"}
+              </h2>
+
+              <p className="text-sm text-slate-600">
+                {completedSale.sync_status === "pending"
+                  ? "This sale is saved on this device and is awaiting synchronization with JESTA."
+                  : "Receipt is ready for printing."}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setCompletedSale(null)}
+              className="rounded-lg p-2 text-slate-500 hover:bg-white"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          {completedSale.sync_status === "pending" && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <strong>Pending synchronization</strong>
+              <p className="mt-1">
+                This transaction is stored locally. It has not yet been confirmed or recorded in the online sales database.
+              </p>
+              <p className="mt-1 text-xs">
+                Transaction ID: {completedSale.client_transaction_id}
+              </p>
+            </div>
+          )}
+
+          {completedSale.sync_status === "synced" && (
+            <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+              <strong>Offline sale synchronized</strong>
+              <p className="mt-1">
+                This sale has now been confirmed and recorded in the JESTA online database.
+              </p>
+            </div>
+          )}
+
+          <Receipt sale={completedSale} />
+        </div>
+      )}
+
+      {/* PARKED / HELD SALES */}
+      <section className="jesta-sales-section mb-6 overflow-hidden rounded-xl">
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-amber-50 p-2 text-amber-700">
+              <PauseCircle size={21} />
+            </div>
+
+            <div>
+              <h2 className="font-semibold text-slate-900">
+                Held Sales ({parkedSales.length})
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Save unfinished orders and resume them when ready.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={loadParkedSales}
+            disabled={loadingParkedSales || processingSale || !isOnline}
+            className="jesta-btn justify-center border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <RefreshCw
+              size={16}
+              className={loadingParkedSales ? "animate-spin" : ""}
+            />
+            Refresh
+          </button>
+        </div>
+
+        {loadingParkedSales ? (
+          <div className="p-6 text-center text-sm text-slate-500">
+            <RefreshCw
+              size={20}
+              className="mx-auto mb-2 animate-spin"
+            />
+            Loading held sales...
+          </div>
+        ) : parkedSales.length === 0 ? (
+          <div className="p-8 text-center">
+            <Clock
+              size={30}
+              className="mx-auto text-slate-300"
+            />
+            <h3 className="mt-3 font-medium text-slate-800">
+              No held sales
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Add products to the cart and select Hold Sale to save an unfinished order.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
+            {parkedSales.map((sale) => {
+              const items = Array.isArray(sale.items)
+                ? sale.items
+                : [];
+
+              const itemCount = items.reduce(
+                (sum, item) =>
+                  sum + Number(item.quantity || 0),
+                0
+              );
+
+              return (
+                <div
+                  key={sale.id}
+                  className="rounded-xl border border-slate-200 bg-white p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate font-semibold text-slate-900">
+                        {sale.customer_name || "Walk-in Customer"}
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {sale.sale_number}
+                      </p>
+                    </div>
+
+                    <span className="shrink-0 rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+                      On hold
+                    </span>
+                  </div>
+
+                  <div className="mt-4 space-y-2 text-sm text-slate-600">
+                    <div className="flex justify-between gap-2">
+                      <span>Quantity</span>
+                      <span className="font-medium text-slate-900">
+                        {itemCount}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between gap-2">
+                      <span>Total</span>
+                      <span className="font-bold text-slate-900">
+                        {formatCurrency(sale.total_amount)}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between gap-2">
+                      <span>Payment method</span>
+                      <span className="capitalize">
+                        {sale.payment_method || "cash"}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-slate-400">
+                      Held {new Date(sale.created_at).toLocaleString("en-KE")}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => resumeParkedSale(sale)}
+                      disabled={processingSale || !isOnline}
+                      className="jesta-btn jesta-sales-primary flex-1 justify-center disabled:opacity-50"
+                    >
+                      <RotateCcw size={16} />
+                      Resume Sale
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => deleteParkedSale(sale)}
+                      disabled={processingSale || !isOnline}
+                      className="jesta-btn justify-center border border-red-200 bg-white text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      title="Delete parked sale"
+                      aria-label="Delete parked sale"
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* MAIN SALES WORKSPACE */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        {/* PRODUCTS */}
+        <section className="jesta-sales-section overflow-hidden">
+          <div className="border-b border-slate-200 p-5">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="rounded-lg bg-teal-50 p-2 text-teal-700">
+                <ShoppingCart size={20} />
+              </div>
+              <div>
+                <h2 className="font-semibold text-slate-900">
+                  Products
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Select products or scan a barcode.
+                </p>
+              </div>
+            </div>
+
+            {/* BARCODE SCANNING */}
+            <form onSubmit={handleBarcodeScan} className="mb-4 flex gap-2">
+              <div className="relative flex-1">
+                <ScanBarcode
+                  size={18}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  ref={barcodeInputRef}
+                  type="text"
+                  value={barcodeInput}
+                  onChange={(event) => setBarcodeInput(event.target.value)}
+                  placeholder="Scan or enter barcode..."
+                  className="jesta-input w-full pl-10"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={scanningBarcode || !barcodeInput.trim()}
+                className="jesta-btn jesta-sales-primary"
+              >
+                {scanningBarcode ? (
+                  <RefreshCw size={18} className="animate-spin" />
+                ) : (
+                  <ScanBarcode size={18} />
+                )}
+                <span className="hidden sm:inline">Scan</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCameraError("");
+                  setCameraScannerOpen(true);
+                }}
+                disabled={scanningBarcode}
+                className="jesta-btn border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Scan using phone camera"
+              >
+                <Camera size={18} />
+                <span className="hidden sm:inline">Camera</span>
+              </button>
+            </form>
+
+            {/* PRODUCT SEARCH */}
+            <div className="relative">
+              <Search
+                size={18}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search products by name, SKU or barcode..."
+                className="jesta-sales-search w-full rounded-lg py-3 pl-10 pr-4 outline-none"
+              />
+            </div>
+          </div>
+
+          {/* PRODUCT LIST */}
+          <div className="p-5">
+            {filteredProducts.length === 0 ? (
+              <div className="py-12 text-center">
+                <PackageIconFallback />
+                <h3 className="mt-3 font-medium text-slate-900">
+                  No products found
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Try a different search term.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredProducts.map((product) => {
+                  const stock = Number(product.stock_quantity || 0);
+                  const lowStock = stock > 0 && stock <= 5;
+                  const outOfStock = stock <= 0;
+
+                  return (
+                    <div
+                      key={product.id}
+                      className="jesta-product p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="jesta-product-icon flex h-11 w-11 items-center justify-center rounded-lg">
+                          <ShoppingCart size={20} />
+                        </div>
+
+                        {outOfStock ? (
+                          <span className="jesta-stock-out rounded-full px-2 py-1 text-xs font-semibold">
+                            Out of stock
+                          </span>
+                        ) : lowStock ? (
+                          <span className="jesta-stock-low rounded-full px-2 py-1 text-xs font-semibold">
+                            Low stock
+                          </span>
+                        ) : (
+                          <span className="jesta-stock-good rounded-full px-2 py-1 text-xs font-semibold">
+                            {stock} in stock
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-4">
+                        <h3 className="line-clamp-2 min-h-[48px] font-semibold text-slate-900">
+                          {product.name}
+                        </h3>
+
+                        {product.sku && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            SKU: {product.sku}
+                          </p>
+                        )}
+
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <span className="jesta-product-price text-lg font-bold">
+                            {formatCurrency(product.selling_price)}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => addToCart(product)}
+                            disabled={outOfStock}
+                            className="jesta-product-add flex h-9 w-9 items-center justify-center rounded-lg transition disabled:cursor-not-allowed disabled:opacity-40"
+                            title="Add to cart"
+                          >
+                            <Plus size={18} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* CART AND PAYMENT */}
+        <aside className="jesta-cart-panel flex min-h-[600px] flex-col overflow-hidden bg-white">
+          <div className="jesta-cart-header p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold">Current Sale</h2>
+                <p className="mt-1 text-sm text-slate-300">
+                  {cart.length} product{cart.length === 1 ? "" : "s"}
+                </p>
+              </div>
+
+              {cart.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearCart}
+                  disabled={processingSale}
+                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10 disabled:opacity-50"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* CART ITEMS */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {cart.length === 0 ? (
+              <div className="flex min-h-[300px] flex-col items-center justify-center text-center">
+                <div className="rounded-full bg-slate-100 p-4 text-slate-400">
+                  <ShoppingCart size={30} />
+                </div>
+                <h3 className="mt-4 font-semibold text-slate-900">
+                  Cart is empty
+                </h3>
+                <p className="mt-1 max-w-xs text-sm text-slate-500">
+                  Add products from the product list to start a new sale.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {cart.map((item) => {
+                  const lineTotal =
+                    Number(item.selling_price || 0) *
+                    Number(item.quantity || 0);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="jesta-cart-item p-3"
+                    >
+                      <div className="flex gap-3">
+                        <div className="jesta-product-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
+                          <ShoppingCart size={17} />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <h3 className="line-clamp-2 text-sm font-semibold text-slate-900">
+                                {item.name}
+                              </h3>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {formatCurrency(item.selling_price)} each
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeFromCart(item.id)}
+                              disabled={processingSale}
+                              className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                              title="Remove item"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+
+                          <div className="mt-3 flex items-center justify-between">
+                            <div className="flex items-center rounded-lg border border-slate-200 bg-white">
+                              <button
+                                type="button"
+                                onClick={() => updateQuantity(item.id, -1)}
+                                disabled={processingSale}
+                                className="p-2 text-slate-500 hover:text-slate-900 disabled:opacity-50"
+                              >
+                                <Minus size={14} />
+                              </button>
+
+                              <span className="min-w-[32px] text-center text-sm font-semibold">
+                                {item.quantity}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={() => updateQuantity(item.id, 1)}
+                                disabled={processingSale}
+                                className="p-2 text-slate-500 hover:text-slate-900 disabled:opacity-50"
+                              >
+                                <Plus size={14} />
+                              </button>
+                            </div>
+
+                            <span className="text-sm font-bold text-slate-900">
+                              {formatCurrency(lineTotal)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* CHECKOUT */}
+          <div className="border-t border-slate-200 bg-white p-4">
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between text-slate-600">
+                <span>Subtotal</span>
+                <span className="font-medium">
+                  {formatCurrency(subtotal)}
+                </span>
+              </div>
+
+              <div className="flex justify-between text-slate-600">
+                <span>Tax</span>
+                <span className="font-medium">
+                  {formatCurrency(tax)}
+                </span>
+              </div>
+
+              <div className="flex justify-between text-slate-600">
+                <span>Discount</span>
+                <span className="font-medium">
+                  {formatCurrency(discount)}
+                </span>
+              </div>
+            </div>
+
+            <div className="jesta-total-box mt-4 rounded-xl p-4 text-white">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-300">Total</span>
+                <span className="jesta-total-value text-2xl font-bold">
+                  {formatCurrency(total)}
+                </span>
+              </div>
+            </div>
+
+            {/* CUSTOMER */}
+            <div className="mt-5">
+              <label className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-700">
+                <User size={16} />
+                Customer
+              </label>
+
+              <select
+                value={selectedCustomer}
+                onChange={handleCustomerChange}
+                disabled={processingSale}
+                className="jesta-select w-full"
+              >
+                <option value="">Walk-in Customer</option>
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
+                    {customer.phone ? ` — ${customer.phone}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* PAYMENT METHOD */}
+            <div className="mt-5">
+              <label className="mb-2 block text-sm font-medium text-slate-700">
+                Payment Method
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handlePaymentMethodChange("cash")}
+                  disabled={processingSale}
+                  className={`jesta-payment-method flex flex-col items-center gap-1 rounded-lg p-3 text-xs font-medium ${
+                    paymentMethod === "cash" ? "active" : ""
+                  }`}
+                >
+                  <Banknote size={19} />
+                  Cash
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handlePaymentMethodChange("mpesa")}
+                  disabled={processingSale}
+                  className={`jesta-payment-method flex flex-col items-center gap-1 rounded-lg p-3 text-xs font-medium ${
+                    paymentMethod === "mpesa" ? "active" : ""
+                  }`}
+                >
+                  <Smartphone size={19} />
+                  M-Pesa
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handlePaymentMethodChange("card")}
+                  disabled={processingSale}
+                  className={`jesta-payment-method flex flex-col items-center gap-1 rounded-lg p-3 text-xs font-medium ${
+                    paymentMethod === "card" ? "active" : ""
+                  }`}
+                >
+                  <CreditCard size={19} />
+                  Card
+                </button>
+              </div>
+
+              {!isOnline && paymentMethod !== "cash" && (
+                <p className="mt-2 text-xs text-red-600">
+                  This payment method requires an internet connection. Select Cash to record an offline sale.
+                </p>
+              )}
+            </div>
+
+            {/* M-PESA PHONE NUMBER */}
+            {paymentMethod === "mpesa" && (
+              <div className="mt-5 rounded-xl border border-teal-100 bg-teal-50 p-4">
+                <div className="mb-3 flex items-start gap-3">
+                  <div className="rounded-lg bg-white p-2 text-teal-700 shadow-sm">
+                    <Smartphone size={18} />
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-semibold text-teal-900">
+                      M-Pesa Payment
+                    </p>
+                    <p className="mt-1 text-xs text-teal-700">
+                      The customer will receive an M-Pesa prompt for{" "}
+                      <strong>{formatCurrency(total)}</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  M-Pesa Phone Number
+                </label>
+
+                <input
+                  type="tel"
+                  value={mpesaPhoneNumber}
+                  onChange={(event) =>
+                    setMpesaPhoneNumber(event.target.value)
+                  }
+                  disabled={processingSale}
+                  placeholder="e.g. 0712345678"
+                  className="jesta-input w-full"
+                />
+
+                <p className="mt-2 text-xs text-slate-500">
+                  Use 07XXXXXXXX, 01XXXXXXXX or 254XXXXXXXXX.
+                </p>
+              </div>
+            )}
+
+            {/* TRANSACTION REFERENCE */}
+            {paymentMethod !== "mpesa" && (
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  Transaction Reference
+                </label>
+
+                <input
+                  type="text"
+                  value={transactionReference}
+                  onChange={(event) =>
+                    setTransactionReference(event.target.value)
+                  }
+                  disabled={processingSale}
+                  placeholder={
+                    paymentMethod === "card"
+                      ? "Card transaction reference"
+                      : "Optional reference"
+                  }
+                  className="jesta-input w-full"
+                />
+              </div>
+            )}
+
+            {/* AMOUNT PAID */}
+            {paymentMethod !== "mpesa" ? (
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  Amount Paid
+                </label>
+
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={amountPaid}
+                  onChange={(event) =>
+                    setAmountPaid(event.target.value)
+                  }
+                  disabled={processingSale}
+                  placeholder="Enter amount paid"
+                  className="jesta-input w-full text-lg font-semibold"
+                />
+              </div>
+            ) : (
+              <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-600">
+                    Amount to Pay
+                  </span>
+                  <span className="text-lg font-bold text-slate-900">
+                    {formatCurrency(total)}
+                  </span>
+                </div>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Amount will be recorded after the customer pays.
+                </p>
+              </div>
+            )}
+
+            {/* CHANGE AND BALANCE */}
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-green-50 p-3">
+                <p className="text-xs font-medium text-green-700">
+                  Change
+                </p>
+                <p className="mt-1 text-base font-bold text-green-800">
+                  {formatCurrency(
+                    paymentMethod === "mpesa" ? 0 : change
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-amber-50 p-3">
+                <p className="text-xs font-medium text-amber-700">
+                  {paymentMethod === "mpesa" ? "Awaiting" : "Balance"}
+                </p>
+                <p className="mt-1 text-base font-bold text-amber-800">
+                  {formatCurrency(
+                    paymentMethod === "mpesa" ? total : balance
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* HOLD SALE */}
+            <button
+              type="button"
+              onClick={parkCurrentSale}
+              disabled={
+                processingSale ||
+                cart.length === 0 ||
+                !isOnline
+              }
+              className="jesta-btn mt-5 mb-3 w-full justify-center border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <PauseCircle size={18} />
+              Hold Sale
+            </button>
+
+            {/* COMPLETE SALE / CLEAR CART */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={handleCompleteSale}
+                disabled={
+                  processingSale ||
+                  cart.length === 0 ||
+                  (paymentMethod !== "mpesa" && paid < total) ||
+                  (paymentMethod === "mpesa" &&
+                    !mpesaPhoneNumber.trim()) ||
+                  (!isOnline && paymentMethod !== "cash")
+                }
+                className="jesta-complete-sale jesta-btn justify-center sm:col-span-1"
+              >
+                {processingSale ? (
+                  <RefreshCw
+                    size={18}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <CheckCircle size={18} />
+                )}
+
+                {processingSale
+                  ? paymentMethod === "mpesa"
+                    ? "Waiting for Payment..."
+                    : "Processing..."
+                  : !isOnline
+                    ? "Save Offline Cash Sale"
+                    : paymentMethod === "mpesa"
+                      ? "Send M-Pesa Prompt"
+                      : "Complete Sale"}
+              </button>
+
+              <button
+                type="button"
+                onClick={clearCart}
+                disabled={processingSale || cart.length === 0}
+                className="jesta-btn justify-center border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Trash2 size={18} />
+                Clear Cart
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function PackageIconFallback() {
+  return (
+    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+      <ShoppingCart size={26} />
+    </div>
+  );
+}
+
+export default Sales;

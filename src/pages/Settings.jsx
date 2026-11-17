@@ -124,11 +124,6 @@ function Settings() {
     },
   ];
 
-  useEffect(() => {
-    loadCurrentUser();
-    loadBusiness();
-    loadEmployees();
-  }, []);
 
   const clearMessages = () => {
     setMessage("");
@@ -528,6 +523,17 @@ function Settings() {
       setLoadingEmployees(false);
     }
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadCurrentUser();
+      loadBusiness();
+      loadEmployees();
+    }, 0);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleEmployeeFormChange = (event) => {
     const { name, value } = event.target;

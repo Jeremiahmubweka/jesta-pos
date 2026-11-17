@@ -82,7 +82,7 @@ function Purchases() {
     loadData();
   }, []);
 
-  const loadData = async () => {
+  async function loadData() {
     setLoading(true);
     setError("");
 
@@ -163,7 +163,7 @@ function Purchases() {
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   // =========================
   // PURCHASE NUMBER

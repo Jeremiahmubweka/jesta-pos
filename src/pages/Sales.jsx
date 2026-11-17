@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Plus,
@@ -32,6 +32,26 @@ import {
   getBusinessRecords,
 } from "../lib/offline/database";
 import Receipt from "../components/Receipt";
+
+async function getBusinessId() {
+    const {
+      data: businessId,
+      error: businessError,
+    } = await supabase.rpc("get_my_business_id");
+
+    if (businessError) {
+      throw businessError;
+    }
+
+    if (!businessId) {
+      throw new Error(
+        "No business is associated with the current user."
+      );
+    }
+
+    return businessId;
+  }
+
 
 function Sales() {
   const [products, setProducts] = useState([]);
@@ -71,6 +91,7 @@ function Sales() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   const barcodeInputRef = useRef(null);
+  const lookupBarcodeAndAddToCartRef = useRef(null);
 
   const cameraVideoRef = useRef(null);
   const cameraControlsRef = useRef(null);
@@ -129,7 +150,7 @@ function Sales() {
    *
    * Local caching problems must never break normal online sales.
    */
-  const loadSalesData = async () => {
+  const loadSalesData = useCallback(async () => {
     try {
       setLoading(true);
       setErrorMessage("");
@@ -211,7 +232,8 @@ function Sales() {
           savedBusiness.value === null
         ) {
           throw new Error(
-            "No previously cached business catalogue is available on this device."
+            "No previously cached business catalogue is available on this device.",
+            { cause: error }
           );
         }
 
@@ -240,29 +262,12 @@ function Sales() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
 
   /*
    * GET THE CURRENT USER'S BUSINESS
    */
-  const getBusinessId = async () => {
-    const {
-      data: businessId,
-      error: businessError,
-    } = await supabase.rpc("get_my_business_id");
-
-    if (businessError) {
-      throw businessError;
-    }
-
-    if (!businessId) {
-      throw new Error(
-        "No business is associated with the current user."
-      );
-    }
-
-    return businessId;
-  };
 
   /*
    * ---------------------------------------------------------
@@ -279,7 +284,7 @@ function Sales() {
    * The Supabase function uses that ID to prevent duplicate
    * sales when a request is retried.
    */
-  const syncPendingOfflineSales = async () => {
+  const syncPendingOfflineSales = useCallback(async () => {
     if (!navigator.onLine) {
       return;
     }
@@ -553,7 +558,8 @@ function Sales() {
       syncingOfflineSalesRef.current = false;
       setSyncingOfflineSales(false);
     }
-  };
+  }, [loadSalesData]);
+
 
   /*
    * AUTOMATICALLY CHECK FOR OFFLINE SALES
@@ -566,13 +572,17 @@ function Sales() {
       return;
     }
 
-    syncPendingOfflineSales();
-  }, [isOnline, loading]);
+    const syncTimer = window.setTimeout(() => {
+      void syncPendingOfflineSales();
+    }, 0);
+
+    return () => window.clearTimeout(syncTimer);
+  }, [isOnline, loading, syncPendingOfflineSales]);
 
   /*
    * LOAD PARKED SALES
    */
-  const loadParkedSales = async () => {
+  const loadParkedSales = useCallback(async () => {
     try {
       setLoadingParkedSales(true);
 
@@ -601,18 +611,18 @@ function Sales() {
     } finally {
       setLoadingParkedSales(false);
     }
-  };
+  }, []);
+
 
   useEffect(() => {
-    loadSalesData();
-    loadParkedSales();
-
-    const focusTimer = setTimeout(() => {
+    const loadTimer = window.setTimeout(() => {
+      void loadSalesData();
+      void loadParkedSales();
       barcodeInputRef.current?.focus();
-    }, 300);
+    }, 0);
 
-    return () => clearTimeout(focusTimer);
-  }, []);
+    return () => window.clearTimeout(loadTimer);
+  }, [loadSalesData, loadParkedSales]);
 
   /*
    * STOP THE CAMERA SCANNER COMPLETELY
@@ -660,6 +670,7 @@ function Sales() {
     }
 
     let cancelled = false;
+    const videoElement = cameraVideoRef.current;
 
     const startCamera = async () => {
       try {
@@ -671,7 +682,7 @@ function Sales() {
           setTimeout(resolve, 150);
         });
 
-        if (cancelled || !cameraVideoRef.current) {
+        if (cancelled || !videoElement) {
           return;
         }
 
@@ -696,7 +707,7 @@ function Sales() {
 
         const controls = await reader.decodeFromConstraints(
           constraints,
-          cameraVideoRef.current,
+          videoElement,
           (result, error) => {
             if (cancelled) {
               return;
@@ -726,7 +737,7 @@ function Sales() {
                 setCameraScannerOpen(false);
                 setCameraLoading(false);
 
-                lookupBarcodeAndAddToCart(scannedValue);
+                lookupBarcodeAndAddToCartRef.current?.(scannedValue);
               }
             }
 
@@ -796,12 +807,106 @@ function Sales() {
       barcodeReaderRef.current = null;
       cameraProcessingRef.current = false;
 
-      if (cameraVideoRef.current) {
-        cameraVideoRef.current.pause();
-        cameraVideoRef.current.srcObject = null;
+      if (videoElement) {
+        videoElement.pause();
+        videoElement.srcObject = null;
       }
     };
   }, [cameraScannerOpen]);
+
+  /*
+   * FILTER PRODUCTS
+   */
+  const filteredProducts = useMemo(() => {
+    const search = searchTerm.trim().toLowerCase();
+
+    if (!search) {
+      return products;
+    }
+
+    return products.filter((product) => {
+      const name = String(product.name || "").toLowerCase();
+      const sku = String(product.sku || "").toLowerCase();
+      const barcode = String(product.barcode || "").toLowerCase();
+
+      return (
+        name.includes(search) ||
+        sku.includes(search) ||
+        barcode.includes(search)
+      );
+    });
+  }, [products, searchTerm]);
+
+  /*
+   * CALCULATE TOTALS
+   */
+  const subtotal = useMemo(() => {
+    return cart.reduce(
+      (totalAmount, item) =>
+        totalAmount +
+        Number(item.selling_price || 0) *
+          Number(item.quantity || 0),
+      0
+    );
+  }, [cart]);
+
+  const tax = 0;
+  const discount = 0;
+
+  const total = Math.max(subtotal + tax - discount, 0);
+
+  const paid = Number(amountPaid) || 0;
+
+  const change = Math.max(paid - total, 0);
+  const balance = Math.max(total - paid, 0);
+
+  /*
+   * ADD PRODUCT TO CART
+   */
+  const addToCart = useCallback((product) => {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const stock = Number(product.stock_quantity || 0);
+
+    if (stock <= 0) {
+      setErrorMessage(`${product.name} is out of stock.`);
+      return;
+    }
+
+    setCart((currentCart) => {
+      const existingItem = currentCart.find(
+        (item) => String(item.id) === String(product.id)
+      );
+
+      if (existingItem) {
+        if (Number(existingItem.quantity) >= stock) {
+          setErrorMessage(
+            `Only ${stock} unit${stock === 1 ? "" : "s"} of ${product.name} available.`
+          );
+
+          return currentCart;
+        }
+
+        return currentCart.map((item) =>
+          String(item.id) === String(product.id)
+            ? {
+                ...item,
+                quantity: Number(item.quantity) + 1,
+              }
+            : item
+        );
+      }
+
+      return [
+        ...currentCart,
+        {
+          ...product,
+          quantity: 1,
+        },
+      ];
+    });
+  }, []);
 
   /*
    * ADD A SCANNED BARCODE TO THE CART
@@ -812,7 +917,7 @@ function Sales() {
    * Offline or online lookup failure:
    * Search the products already loaded into the local catalogue.
    */
-  const lookupBarcodeAndAddToCart = async (barcodeValue) => {
+  const lookupBarcodeAndAddToCart = useCallback(async (barcodeValue) => {
     const barcode = String(barcodeValue || "").trim();
 
     if (!barcode) {
@@ -886,101 +991,13 @@ function Sales() {
         barcodeInputRef.current?.focus();
       }, 100);
     }
-  };
+  }, [products, addToCart]);
 
-  /*
-   * FILTER PRODUCTS
-   */
-  const filteredProducts = useMemo(() => {
-    const search = searchTerm.trim().toLowerCase();
 
-    if (!search) {
-      return products;
-    }
 
-    return products.filter((product) => {
-      const name = String(product.name || "").toLowerCase();
-      const sku = String(product.sku || "").toLowerCase();
-      const barcode = String(product.barcode || "").toLowerCase();
-
-      return (
-        name.includes(search) ||
-        sku.includes(search) ||
-        barcode.includes(search)
-      );
-    });
-  }, [products, searchTerm]);
-
-  /*
-   * CALCULATE TOTALS
-   */
-  const subtotal = useMemo(() => {
-    return cart.reduce(
-      (totalAmount, item) =>
-        totalAmount +
-        Number(item.selling_price || 0) *
-          Number(item.quantity || 0),
-      0
-    );
-  }, [cart]);
-
-  const tax = 0;
-  const discount = 0;
-
-  const total = Math.max(subtotal + tax - discount, 0);
-
-  const paid = Number(amountPaid) || 0;
-
-  const change = Math.max(paid - total, 0);
-  const balance = Math.max(total - paid, 0);
-
-  /*
-   * ADD PRODUCT TO CART
-   */
-  const addToCart = (product) => {
-    setErrorMessage("");
-    setSuccessMessage("");
-
-    const stock = Number(product.stock_quantity || 0);
-
-    if (stock <= 0) {
-      setErrorMessage(`${product.name} is out of stock.`);
-      return;
-    }
-
-    setCart((currentCart) => {
-      const existingItem = currentCart.find(
-        (item) => String(item.id) === String(product.id)
-      );
-
-      if (existingItem) {
-        if (Number(existingItem.quantity) >= stock) {
-          setErrorMessage(
-            `Only ${stock} unit${stock === 1 ? "" : "s"} of ${product.name} available.`
-          );
-
-          return currentCart;
-        }
-
-        return currentCart.map((item) =>
-          String(item.id) === String(product.id)
-            ? {
-                ...item,
-                quantity: Number(item.quantity) + 1,
-              }
-            : item
-        );
-      }
-
-      return [
-        ...currentCart,
-        {
-          ...product,
-          quantity: 1,
-        },
-      ];
-    });
-  };
+  useEffect(() => {
+    lookupBarcodeAndAddToCartRef.current = lookupBarcodeAndAddToCart;
+  }, [lookupBarcodeAndAddToCart]);
 
   const handleBarcodeScan = async (event) => {
     event.preventDefault();

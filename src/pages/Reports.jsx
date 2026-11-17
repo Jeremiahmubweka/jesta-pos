@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   TrendingUp,
@@ -32,9 +32,6 @@ function Reports() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    loadReports();
-  }, [period]);
 
   async function getBusinessId() {
     const { data: businessId, error: businessError } =
@@ -99,7 +96,7 @@ function Reports() {
     };
   }
 
-  async function loadReports() {
+  const loadReports = useCallback(async () => {
     setLoading(true);
     setError("");
 
@@ -260,7 +257,15 @@ function Reports() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [period]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadReports();
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [loadReports]);
 
   const totalSales = useMemo(() => {
     return sales.reduce(

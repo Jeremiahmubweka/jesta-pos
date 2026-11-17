@@ -1,4 +1,3 @@
-
 const CACHE_NAME = "jesta-app-v4";
 
 const APP_SHELL = [
@@ -18,7 +17,9 @@ self.addEventListener("install", (event) => {
       });
 
       if (!htmlResponse.ok) {
-        throw new Error("Unable to download JESTA application HTML.");
+        throw new Error(
+          "Unable to download JESTA application HTML."
+        );
       }
 
       await cache.put("/", htmlResponse.clone());
@@ -58,11 +59,17 @@ self.addEventListener("install", (event) => {
             );
           }
         } catch (error) {
-          console.warn("JESTA asset caching failed:", url, error);
+          console.warn(
+            "JESTA asset caching failed:",
+            url,
+            error
+          );
         }
       }
 
-      console.log("JESTA offline application cache installed.");
+      console.log(
+        "JESTA offline application cache installed."
+      );
 
       await self.skipWaiting();
     })()
@@ -87,7 +94,10 @@ self.addEventListener("activate", (event) => {
 
       await self.clients.claim();
 
-      console.log("JESTA service worker activated:", CACHE_NAME);
+      console.log(
+        "JESTA service worker activated:",
+        CACHE_NAME
+      );
     })()
   );
 });
@@ -123,7 +133,7 @@ self.addEventListener("fetch", (event) => {
           }
 
           return response;
-        } catch (error) {
+        } catch {
           const cachedPage = await cache.match("/");
 
           if (cachedPage) {
@@ -148,7 +158,7 @@ self.addEventListener("fetch", (event) => {
         }
 
         return response;
-      } catch (error) {
+      } catch {
         return new Response(
           "This file is not available offline.",
           {
