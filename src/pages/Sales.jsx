@@ -26,7 +26,7 @@ import {
   getCachedBusinessCatalog,
 } from "../lib/offline/catalog";
 import {
-  getRecord,
+  getOfflineMetadata,
   putRecord,
   savePendingSale,
   getBusinessRecords,
@@ -52,6 +52,47 @@ async function getBusinessId() {
     return businessId;
   }
 
+/*
+ * IDENTIFY THE CURRENT BUSINESS WHILE OFFLINE.
+ *
+ * Use the cached profile belonging to the currently
+ * authenticated Supabase user, never a shared business key.
+ */
+async function getOfflineBusinessId() {
+  const {
+    data: { session },
+    error,
+  } = await supabase.auth.getSession();
+
+  if (error) {
+    throw error;
+  }
+
+  const userId = session?.user?.id;
+
+  if (!userId) {
+    throw new Error(
+      "JESTA cannot identify the logged-in user offline. Please sign in again when connected."
+    );
+  }
+
+  const cachedProfile = await getOfflineMetadata(
+    `jesta_profile_${userId}`
+  );
+
+  if (
+    !cachedProfile ||
+    cachedProfile.id !== userId ||
+    cachedProfile.is_active !== true ||
+    !cachedProfile.business_id
+  ) {
+    throw new Error(
+      "No valid offline business profile is available for this user. Reconnect to the internet and open JESTA before using offline checkout."
+    );
+  }
+
+  return cachedProfile.business_id;
+}
 
 function Sales() {
   const [products, setProducts] = useState([]);
@@ -200,12 +241,6 @@ function Sales() {
           customers
         );
 
-        await putRecord("metadata", {
-          key: "offline_business_id",
-          value: businessId,
-          verified_at: new Date().toISOString(),
-        });
-
         console.log("JESTA offline catalogue updated.");
       } catch (cacheError) {
         console.warn(
@@ -221,24 +256,11 @@ function Sales() {
        * ATTEMPT TO LOAD THE LAST CACHED CATALOGUE.
        */
       try {
-        const savedBusiness = await getRecord(
-          "metadata",
-          "offline_business_id"
-        );
-
-        if (
-          !savedBusiness ||
-          savedBusiness.value === undefined ||
-          savedBusiness.value === null
-        ) {
-          throw new Error(
-            "No previously cached business catalogue is available on this device.",
-            { cause: error }
-          );
-        }
+        const offlineBusinessId =
+          await getOfflineBusinessId();
 
         const cachedCatalog = await getCachedBusinessCatalog(
-          savedBusiness.value
+          offlineBusinessId
         );
 
         setProducts(cachedCatalog.products || []);
@@ -1132,18 +1154,7 @@ function Sales() {
      * USE THE BUSINESS ID SAVED DURING THE LAST
      * SUCCESSFUL ONLINE CATALOGUE LOAD.
      */
-    const savedBusiness = await getRecord(
-      "metadata",
-      "offline_business_id"
-    );
-
-    const businessId = savedBusiness?.value;
-
-    if (!businessId) {
-      throw new Error(
-        "JESTA cannot identify this business offline. Reconnect to the internet, open the sales workspace and try again."
-      );
-    }
+    const businessId = await getOfflineBusinessId();
 
     /*
      * GENERATE A UNIQUE LOCAL TRANSACTION ID.
